@@ -4,7 +4,7 @@ breed [groceries grocery]
 breed [commutes commute]
 breed [workplaces workplace]
 
-globals[leisure
+globals[
   ;sdp ;not used
   maskcnt
   asymptomatic-chance ;Added by AIC
@@ -31,7 +31,7 @@ globals[leisure
   commute-radius
   healthcare-radius
   workplace1-radius
-  -radius
+  workplace2-radius
   reinfections
   vaccinations ;number of people who were successfully vaccinated ;Added by AIC
   vax-goal ;number of people to be vaccinated before going to the next priority group ;added by AIC
@@ -97,7 +97,7 @@ patches-own[
   hospital-patch?
   commute-patch?
   workplace-patch?
-  leisure-patch?
+  workplace-patch2?
 ]
 
 to randomize-spawn
@@ -129,7 +129,7 @@ to setup
   create-commutes 1 [setxy 0 0 set color blue]
   create-groceries 1 [setxy (-(max-pxcor / 2)) (-(max-pycor / 2)) set color blue]
   create-workplaces 1 [setxy (-(max-pxcor / 2)) (max-pycor / 2) set color blue]
-  create-leisure 1 [setxy (max-pxcor / 2) (-(max-pycor / 2)) set color blue]
+  create-workplaces 1 [setxy (max-pxcor / 2) (-(max-pycor / 2)) set color blue]
   setup-patch-area
   setup-patches
   set infect-count-work 0
@@ -172,13 +172,21 @@ to setup
     set asymptomatic? false ;added by AIC
     set severe? false ;added by AIC
     set exposed? false
-    set times-infected 0
+    set times-infected random 3
+    if times-infected > 0 [set recovered-time random-normal 28280 1000]
     ;set immune? false ;added by AIC
-    set relative-susceptibility 1
+    set relative-susceptibility ( ( 1 / 5 ) ^ times-infected )
     set vaccinated? false ;added by AIC
   ]
 
-  ask n-of starting-infected persons [get-sick] ;begin with some infected people
+;  ask n-of random-normal (total-population / 2) 100 persons[
+;    set times-infected random 3
+;  ]
+
+  ask n-of starting-infected persons [
+    get-sick
+    set infectious-time random-normal (recovery * 0.66) distribution
+  ] ;begin with some infected people
   set total-cases starting-infected
 
   ask n-of comorbidity-count persons[
@@ -207,7 +215,7 @@ to setup
   set vax-count 0
   set vax-goal healthcare-worker-count
   set vax-group 1
-  ask n-of starting-vax-count persons with [color != red and healthcare-worker? = true][
+  ask n-of starting-vax-count persons with [color != red][
     vaccinate
   ] ;added by AIC
 
@@ -231,12 +239,9 @@ to setup
   set-relative-risk
   reset-ticks
 
-  if quarantine-level = "Alert Level 1" [ask persons [level1-assign-task]]
-  if quarantine-level = "Alert Level 2" [ask persons [level2-assign-task]]
-  if quarantine-level = "Alert Level 3" [ask persons [level3-assign-task]]
-  if quarantine-level = "Alert Level 4" [ask persons [level4-assign-task]]
-  if quarantine-level = "Alert Level 5" [ask persons [level5-assign-task]]
-  
+  if quarantine-level = "GCQ" [ask persons [gcq-assign-task]]
+  if quarantine-level = "MECQ" [ask persons [mecq-assign-task]]
+  if quarantine-level = "ECQ" [ask persons [ecq-assign-task]]
 
   set comorbid-risk-mod 1.2
   set senior-risk-mod 1.2
@@ -257,9 +262,9 @@ to go
   if maximum-days != 0 [if (days - 1) >= maximum-days [stop]]
 
   if ticks mod zerohour = 0 [
-    if quarantine-level = "Alert Level 1" [ask persons [level1-assign-task]]
-    if quarantine-level = "Alert Level 2" [ask persons [level2-assign-task]]
-    if quarantine-level = "Alert Level 3" [ask persons [level3-assign-task]]
+    if quarantine-level = "GCQ" [ask persons [gcq-assign-task]]
+    if quarantine-level = "MECQ" [ask persons [mecq-assign-task]]
+    if quarantine-level = "ECQ" [ask persons [ecq-assign-task]]
     ;ask persons[mecq-assign-task]
     set days days + 1
   ]
@@ -288,7 +293,6 @@ to go
   workplacing
   grocerying
   hospitaling
-  leisuring
   gohome
  tick
 end
@@ -325,6 +329,7 @@ to set-relative-risk
     if comorbidity? = true [set relative-risk (base-infection-risk * comorbid-risk-mod)]
     ;modifies relative risk based on ppe
     if mask? = true [set relative-risk (relative-risk * (1 - ppe-efficiency))]
+    set relative-risk (relative-risk * relative-susceptibility)
   ]
 end
 
@@ -344,7 +349,7 @@ to infect
           if random-float 1 < relative-risk [get-sick]
         ]
       ][
-        ask persons with [infected? = false] in-radius 1 [
+        ask persons with [infected? = false] in-radius 0.133 [
           if random-float 1 < relative-risk [get-sick]
         ]
       ]
@@ -354,7 +359,7 @@ to infect
           if random-float 1 < (relative-risk * random-normal 0.4 0.1) [get-sick] ;Find out actual chances if infected has mask
         ]
       ][
-        ask persons with [infected? = false] in-radius 1 [
+        ask persons with [infected? = false] in-radius 0.133 [
           if random-float 1 < (relative-risk * random-normal 0.4 0.1) [get-sick] ;Find out actual chances if infected has mask
         ]
       ]
@@ -410,7 +415,11 @@ to vaccinate
   if vaccinated? = false [
     if (times-infected > 0 and recovered-time > 29280) or times-infected = 0 [ ;29280 is the number of ticks for 61 days
       set vaccinated? true
-      set vax-efficacy random-normal 0.725 0.225
+      (ifelse
+        vax-type = "mRNA" [set vax-efficacy 0.85]
+        vax-type = "Viral-Vector" [set vax-efficacy 0.7]
+        vax-type = "Inactivated" [set vax-efficacy 0.42]
+        )
       set relative-risk (relative-risk * (1 - vax-efficacy)) ;modifies relative risk based on vax efficacy
       set color blue
       set vaccinations (vaccinations + 1)
@@ -466,7 +475,6 @@ to setup-patches
     setup-hospital-patch
     setup-workplace-patch
     setup-commute-patch
-    setup-leisure-patch
     recolor-patch
   ]
 end
@@ -485,9 +493,8 @@ end
 
 to setup-workplace-patch
   set workplace-patch? (distancexy (-(max-pxcor / 2)) ((max-pycor / 2))) < workplace1-radius
+  set workplace-patch2? (distancexy (max-pxcor / 2) (-(max-pycor / 2))) < workplace2-radius
 end
-to setup-leisure-patch
-  set leisure-patch? (distancexy (max-pxcor / 2) (-(max-pycor / 2))) < leisure-radius
 
 to recolor-patch
   if hospital-patch? = true
@@ -498,8 +505,8 @@ to recolor-patch
   [set pcolor cyan]
   if workplace-patch? = true
   [set pcolor gray]
-  if leisure-patch? = true
-  [set pcolor magenta]
+  if workplace-patch2? = true
+  [set pcolor gray]
 end
 
 ;to random-move
@@ -978,29 +985,6 @@ to hospitaling
       ask persons with [task = "hospital"] [
         let myhospital nearby-hospitals
         face myhospital
-        forward speed
-      ]
-    ]
-    if task-time > taskt [set taskcnt (taskcnt + 1) set task-time 0]
-  ]
-end
-
-to-report nearby-leisure
-  report min-one-of leisures [distance myself]
-end
-
-to leisuring
-  ask persons with [task = "leisure"] [
-    ifelse pcolor = magenta [
-      set task-time (task-time + 1)
-      ask persons with [task = "leisure"] [
-        right random 360
-        forward speed
-      ]
-    ][
-      ask persons with [task = "leisure"] [
-        let myleisure nearby-leisure
-        face myleisure
         forward speed
       ]
     ]
@@ -2010,7 +1994,7 @@ to setup-patch-area
   set healthcare-radius ( (sqrt (healthcare-area / pi)) / 1.5)
   set commute-radius ( (sqrt (commute-area / pi)) / 1.5)
   set workplace1-radius ( (sqrt (workplace1-area / pi)) / 1.5)
-  set leisure-radius ( (sqrt (leisure-area / pi)) / 1.5)
+  set workplace2-radius ( (sqrt (workplace2-area / pi)) / 1.5)
 end
 
 to count-deaths
@@ -2183,7 +2167,7 @@ INPUTBOX
 1090
 146
 starting-infected
-2.0
+50.0
 1
 0
 Number
@@ -2499,7 +2483,7 @@ INPUTBOX
 1691
 86
 starting-vax-count
-90.0
+500.0
 1
 0
 Number
@@ -2580,6 +2564,16 @@ vax-count
 17
 1
 11
+
+CHOOSER
+30
+285
+180
+330
+vax-type
+vax-type
+"Inactivated" "Viral-Vector" "mRNA"
+2
 
 @#$#@#$#@
 ## WHAT IS IT?
