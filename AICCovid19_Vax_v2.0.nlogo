@@ -3,6 +3,7 @@ breed [hospitals hospital]
 breed [groceries grocery]
 breed [commutes commute]
 breed [workplaces workplace]
+breed [leisures leisure]
 
 globals[
   ;sdp ;not used
@@ -30,8 +31,8 @@ globals[
   grocery-radius
   commute-radius
   healthcare-radius
-  workplace1-radius
-  workplace2-radius
+  workplace-radius
+  leisure-radius
   reinfections
   vaccinations ;number of people who were successfully vaccinated ;Added by AIC
   vax-goal ;number of people to be vaccinated before going to the next priority group ;added by AIC
@@ -97,7 +98,7 @@ patches-own[
   hospital-patch?
   commute-patch?
   workplace-patch?
-  workplace-patch2?
+  leisure-patch?
 ]
 
 to randomize-spawn
@@ -129,7 +130,7 @@ to setup
   create-commutes 1 [setxy 0 0 set color blue]
   create-groceries 1 [setxy (-(max-pxcor / 2)) (-(max-pycor / 2)) set color blue]
   create-workplaces 1 [setxy (-(max-pxcor / 2)) (max-pycor / 2) set color blue]
-  create-workplaces 1 [setxy (max-pxcor / 2) (-(max-pycor / 2)) set color blue]
+  create-leisures 1 [setxy (max-pxcor / 2) (-(max-pycor / 2)) set color blue]
   setup-patch-area
   setup-patches
   set infect-count-work 0
@@ -475,6 +476,7 @@ to setup-patches
     setup-hospital-patch
     setup-workplace-patch
     setup-commute-patch
+    setup-leisure-patch
     recolor-patch
   ]
 end
@@ -492,8 +494,11 @@ to setup-commute-patch
 end
 
 to setup-workplace-patch
-  set workplace-patch? (distancexy (-(max-pxcor / 2)) ((max-pycor / 2))) < workplace1-radius
-  set workplace-patch2? (distancexy (max-pxcor / 2) (-(max-pycor / 2))) < workplace2-radius
+  set workplace-patch? (distancexy (-(max-pxcor / 2)) ((max-pycor / 2))) < workplace-radius
+end
+
+to setup-leisure-patch
+  set leisure-patch? (distancexy (max-pxcor / 2) (-(max-pycor / 2))) < leisure-radius
 end
 
 to recolor-patch
@@ -505,8 +510,8 @@ to recolor-patch
   [set pcolor cyan]
   if workplace-patch? = true
   [set pcolor gray]
-  if workplace-patch2? = true
-  [set pcolor gray]
+  if leisure-patch? = true
+  [set pcolor magenta]
 end
 
 ;to random-move
@@ -1993,8 +1998,8 @@ to setup-patch-area
   set grocery-radius ( (sqrt (grocery-area / pi)) / 1.5)
   set healthcare-radius ( (sqrt (healthcare-area / pi)) / 1.5)
   set commute-radius ( (sqrt (commute-area / pi)) / 1.5)
-  set workplace1-radius ( (sqrt (workplace1-area / pi)) / 1.5)
-  set workplace2-radius ( (sqrt (workplace2-area / pi)) / 1.5)
+  set workplace-radius ( (sqrt (workplace-area / pi)) / 1.5)
+  set leisure-radius ( (sqrt (leisure-area / pi)) / 1.5)
 end
 
 to count-deaths
@@ -2407,7 +2412,7 @@ INPUTBOX
 680
 180
 740
-workplace1-area
+workplace-area
 4500.0
 1
 0
@@ -2418,7 +2423,7 @@ INPUTBOX
 740
 180
 800
-workplace2-area
+leisure-area
 4500.0
 1
 0
