@@ -1059,6 +1059,7 @@ to gcq-assign-task
     let choice random 20
     set task1(ifelse-value
     choice  <= 9 ["stayhome"]
+    choice <= 15 ["leisure"]
     choice  <= 16 ["commute"]
     choice <= 17 ["hospital"]
     choice <= 19 ["groceries"]
@@ -1101,6 +1102,7 @@ to gcq-assign-task
     let choice random 20
     set task1(ifelse-value
     choice  <= 3 ["stayhome"]
+    choice <= 15 ["leisure"]
     choice  <= 9 ["commute"]
     choice <= 17 ["workplace"]
     choice <= 19 ["groceries"]
@@ -1144,6 +1146,7 @@ to gcq-assign-task
     set task1(ifelse-value
     choice <= 3 ["stayhome"]
     choice <= 9 ["commute"]
+    choice <= 15 ["leisure"]
     choice <= 10 ["hospital"]
     choice <= 17["workplace"]
     choice <= 19 ["groceries"]
@@ -2276,7 +2279,7 @@ INPUTBOX
 180
 180
 curfew-hours
-8.0
+0.0
 1
 0
 Number
@@ -2388,7 +2391,7 @@ CHOOSER
 quarantine-level
 quarantine-level
 "GCQ" "MECQ" "ECQ"
-2
+0
 
 MONITOR
 1420

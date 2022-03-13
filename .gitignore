@@ -1,0 +1,10 @@
+*.pdf
+*.txt
+*.gif
+Netlogo_Sim_Updated.nlogo
+AICCovid19_Vax.nlogo
+AICCovid19_Vax_v2.1.nlogo
+Virus.nlogo
+V2.0/
+tests/.ipynb_checkpoints/
+tests/DOH_Data_Drop/
