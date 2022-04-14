@@ -9,10 +9,12 @@ globals[
   ;sdp ;not used
   maskcnt
   asymptomatic-chance ;Added by AIC
+  mild-chance
   severe-chance ;Added by AIC
   recovery
   distribution
   speed
+  time-var
   rand-x
   rand-y
   hour
@@ -47,6 +49,7 @@ globals[
   sim-alert-level
   sim-al-name
   active-cases
+  base-infection-risk
   test1
   test2
 ]
@@ -56,6 +59,7 @@ persons-own [
   social-distancing? ;not really used
   infected?
   asymptomatic? ;Added by AIC
+  mild?
   severe? ;Added by AIC
   mask?
   faceshield?
@@ -87,7 +91,6 @@ persons-own [
   ppe-efficiency
   relative-death-chance ;death chance dependent on health category
   recovery-time ;time until recovery
-  recovered-time ;time after recovery to get vaccine ;added by AIC
   exposed?
   exposed-time
   times-infected
@@ -116,10 +119,14 @@ to randomize-spawn
 end
 
 to setup
+  (ifelse
+    tick-represents = "3 Minutes" [set recovery 6720 set distribution 250 set speed 1 set zerohour 480 set time-var 3]
+    tick-represents = "10 Minutes" [set recovery 2016 set distribution 75 set speed 3 set zerohour 144 set time-var 10]
+    tick-represents = "15 Minutes" [set recovery 1344 set distribution 288 set speed 5 set zerohour 96 set time-var 15]
+   )
   ;if tick-represents = "1 Day" [set recovery 14 set distribution 3 set speed 20] ;not used
   ;if tick-represents = "15 Minutes" [set recovery 1344 set distribution 288 set speed 5 set zerohour 96] ;not used
-  ;if tick-represents = "3 Minutes" [set recovery 6720 set distribution 250 set speed 1 set zerohour 480]
-  if tick-represents = "3 Minutes" [set recovery 4800 set distribution 500 set speed 1 set zerohour 480]
+
   set curfew? true
   set days 0
   set deaths 0
@@ -177,10 +184,10 @@ to setup
     set exposed-time 0
     set infected? false ;added by AIC
     set asymptomatic? false ;added by AIC
+    set mild? false
     set severe? false ;added by AIC
     set exposed? false
-    set times-infected random 3
-    if times-infected > 0 [set recovered-time random-normal 28280 1000]
+    set times-infected random pandemic-time ;depending on how where we are in the pandemic, some people may be infected already
     ;set immune? false ;added by AIC
     set relative-susceptibility ( ( 1 / 5 ) ^ times-infected )
     set vaccinated? false ;added by AIC
@@ -190,11 +197,39 @@ to setup
 ;    set times-infected random 3
 ;  ]
 
-  ask n-of starting-infected persons [
-    get-sick
-    set infectious-time random-normal (recovery * 0.66) distribution
+  ask n-of starting-infected-asymp persons [
+    set infected? true
+    set asymptomatic? true
+    set color orange
+
+    set recovery-time random-normal recovery distribution
+    ifelse pandemic-time > 0 [set infectious-time random-normal (recovery * 0.66) distribution][set infectious-time 0]
+  ]
+  ask n-of starting-infected-mild persons [
+    set infected? true
+    set mild? true
+    set color red
+
+    set recovery-time random-normal recovery distribution
+    ifelse pandemic-time > 0 [set infectious-time random-normal (recovery * 0.66) distribution][set infectious-time 0]
+  ]
+  ask n-of starting-infected-moderate persons [
+    set infected? true
+    set color red
+
+    set recovery-time random-normal recovery distribution
+    ifelse pandemic-time > 0 [set infectious-time random-normal (recovery * 0.66) distribution][set infectious-time 0]
+  ]
+  ask n-of starting-infected-severe persons [
+    set infected? true
+    set severe? true
+    set color red
+
+    set recovery-time random-normal recovery distribution
+    ifelse pandemic-time > 0 [set infectious-time random-normal (recovery * 0.66) distribution][set infectious-time 0]
   ] ;begin with some infected people
-  set total-cases starting-infected
+  set total-cases (starting-infected-asymp + starting-infected-mild + starting-infected-moderate + starting-infected-severe)
+  set active-cases total-cases
 
   ask n-of comorbidity-count persons[
     set comorbidity? true
@@ -243,17 +278,29 @@ to setup
     ;set mask? true
   ]
 
+  al-change
+
+  (ifelse
+    covid-variant = "Non-Delta" [
+      set base-infection-risk 0.006
+      set asymptomatic-chance 0.2 ;added by AIC
+      set mild-chance 0.2;
+      set severe-chance 0.01 ;added by AIC
+    ]
+    covid-variant = "Delta" [
+      set base-infection-risk 0.066
+      set asymptomatic-chance 0.05
+      set mild-chance 0.24
+      set severe-chance 0.475
+    ]
+  )
+  set comorbid-risk-mod 1.2
+  set senior-risk-mod 1.2
+
   set-ppe-efficiency
   set-relative-death-chance
   set-relative-risk
   reset-ticks
-
-  al-change
-
-  set comorbid-risk-mod 1.2
-  set senior-risk-mod 1.2
-  set asymptomatic-chance 0.2 ;added by AIC
-  set severe-chance 0.01 ;added by AIC
 end
 
 to go
@@ -274,15 +321,15 @@ to go
   ]
   ;setting clock
 
-  if tick-represents = "3 Minutes"[set hourly 20]
-  ;if tick-represents = "15 Minutes"[set hourly 4]
+  (ifelse
+    tick-represents = "3 Minutes" [set hourly 20]
+    tick-represents = "10 Minutes" [set hourly 6]
+    tick-represents = "15 Minutes" [set hourly 4]
+    )
 
    if ticks mod hourly = 0 [set hour (hour + 1)]
    if hour = 24 [
     vax-priority
-    ask persons with [infected? = false and times-infected > 0] [
-      set recovered-time (recovered-time + 1)
-    ]
     set hour 0
     ask persons [set taskcnt 1]
   ]
@@ -303,27 +350,29 @@ to go
 end
 
 to al-change
-  if alert-level = "None" [ask persons [al01-assign-task] set sim-alert-level 0 set sim-al-name "No Alert Level"]
-  if alert-level = "Level 1" [ask persons [al01-assign-task] set sim-alert-level 1]
-  if alert-level = "Level 2 & 3" [ask persons [al23-assign-task] set sim-alert-level 3]
-  if alert-level = "Level 4 & 5" [ask persons [al45-assign-task] set sim-alert-level 5]
-  if alert-level = "Auto" [
-    ifelse active-cases < (total-population * 0.025) [
-      ask persons [al01-assign-task]
-      set sim-alert-level 1
-      set sim-al-name "Alert Level 1"
-    ][
-      ifelse active-cases >= (total-population * 0.05) [
-        ask persons [al45-assign-task]
-        set sim-alert-level 5
-        set sim-al-name "Alert Level 4 or 5"
+  (ifelse
+    alert-level = "None" [ask persons [al01-assign-task] set sim-alert-level 0 set sim-al-name "No Alert Level"]
+    alert-level = "Level 1" [ask persons [al01-assign-task] set sim-alert-level 1]
+    alert-level = "Level 2 & 3" [ask persons [al23-assign-task] set sim-alert-level 3]
+    alert-level = "Level 4 & 5" [ask persons [al45-assign-task] set sim-alert-level 5]
+    alert-level = "Auto" [
+      ifelse active-cases < (total-population * 0.025) [
+        ask persons [al01-assign-task]
+        set sim-alert-level 1
+        set sim-al-name "Alert Level 1"
       ][
-        ask persons [al23-assign-task]
-        set sim-alert-level 3
-        set sim-al-name "Alert Level 2 or 3"
+        ifelse active-cases >= (total-population * 0.05) [
+          ask persons [al45-assign-task]
+          set sim-alert-level 5
+          set sim-al-name "Alert Level 4 or 5"
+        ][
+          ask persons [al23-assign-task]
+          set sim-alert-level 3
+          set sim-al-name "Alert Level 2 or 3"
+        ]
       ]
     ]
-  ]
+  )
 end
 
 to move
@@ -398,12 +447,16 @@ end
 
 to get-sick
   set infected? true
-  ifelse random-float 1 < ( asymptomatic-chance / relative-susceptibility) [
+  ifelse random-float 1 < asymptomatic-chance [
     set asymptomatic? true
     set color orange
   ][
     set color red
-    if random-float 1 < severe-chance [set severe? true]
+    ifelse random-float 1 < mild-chance [
+      set mild? true
+    ][
+      if random-float 1 < severe-chance [set severe? true]
+    ]
   ]
 
   set total-cases (total-cases + 1)
@@ -443,18 +496,18 @@ to vax-priority
 end ;added by AIC
 
 to vaccinate
-  if vaccinated? = false [
-    if (times-infected > 0 and recovered-time > 29280) or times-infected = 0 [ ;29280 is the number of ticks for 61 days
-      set vaccinated? true
-      (ifelse
-        vax-type = "mRNA" [set vax-efficacy 0.85]
-        vax-type = "Viral-Vector" [set vax-efficacy 0.7]
-        vax-type = "Inactivated" [set vax-efficacy 0.42]
-        )
-      set relative-risk (relative-risk * (1 - vax-efficacy)) ;modifies relative risk based on vax efficacy
-      set color blue
-      set vaccinations (vaccinations + 1)
-    ]
+  if vaccinated? = false and infected? = false[
+    set vaccinated? true
+    set vax-efficacy (ifelse-value
+      vax-type = "None" [0]
+      vax-type = "mRNA" [0.85]
+      vax-type = "Viral-Vector" [0.7]
+      vax-type = "Inactivated" [0.42]
+      vax-type = "Average" [0.55]
+    )
+    set relative-risk (relative-risk * (1 - vax-efficacy)) ;modifies relative risk based on vax efficacy
+    set color blue
+    set vaccinations (vaccinations + 1)
   ]
   set vax-count (vax-count + 1)
 end ;added by AIC
@@ -478,16 +531,18 @@ to recover
   ask persons with [infected? = true][
     ;infected people recover after some number of days drawn from a normal distribution
     if infectious-time >= recovery-time [
-      if severe? = true [
+      ifelse severe? = true [
         if random-float 1 < (relative-death-chance * 1.05) [die] ;more likely to die if severe
-      ]
-      if severe? = false and asymptomatic? = false [
-        if random-float 1 < relative-death-chance [die]
+      ][
+        if asymptomatic? = false [
+          if random-float 1 < relative-death-chance [die]
+        ]
       ]
       set active-cases (active-cases - 1)
       set recoveries (recoveries + 1)
       set infected? false
       set asymptomatic? false
+      set mild? false
       set severe? false
       set relative-susceptibility (relative-susceptibility / 5) ;Everytime they get and recover, only 20% to get sick again ;added by AIC
       set relative-risk (relative-risk * relative-susceptibility) ;modifies relative risk based on resistance ;added by AIC
@@ -496,7 +551,6 @@ to recover
       ;if mask? = true and faceshield? = true [set shape "shieldman" set color green]
       ifelse vaccinated? = true [set color blue][set color green] ;added by AIC
       set infectious-time 0
-      set recovered-time 0
     ]
   ]
 end
@@ -545,7 +599,7 @@ to recolor-patch
   [set pcolor magenta]
 end
 
-;to random-move
+;to random-move 480
   ;ask persons with [social-distancing? = false and task != "stayhome"]
   ;ask persons with [infected? = false and task != "stayhome"]
   ;ask persons with [task != "stayhome"] [
@@ -556,9 +610,9 @@ end
 
 ;to assign-tasks ;not used
   ;if senior? = true [
-    ;ifelse random 20 < 19[set task1 "stayhome" set task1t 160] [set task1 "commute" set task1t random-normal 20 5]
-    ;ifelse random 20 < 19[set task2 "stayhome" set task2t 160] [set task2 "commute" set task2t random-normal 20 5]
-    ;ifelse random 20 < 19[set task3 "stayhome" set task3t 160] [set task3 "commute" set task3t random-normal 20 5]
+    ;ifelse random 20 < 19[set task1 "stayhome" set task1t 480] [set task1 "commute" set task1t (random-normal 60 15)]
+    ;ifelse random 20 < 19[set task2 "stayhome" set task2t 480] [set task2 "commute" set task2t (random-normal 60 15)]
+    ;ifelse random 20 < 19[set task3 "stayhome" set task3t 480] [set task3 "commute" set task3t (random-normal 60 15)]
   ;]
   ;if ordinary-citizen? = true and comorbidity? = false and senior? = false [
     ;let choice random 10
@@ -575,16 +629,16 @@ end
     ;choice = 9 ["groceries"]
     ;)
     ;set task1t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [160]
-    ;choice = 2 [160]
-    ;choice = 3 [160]
-    ;choice = 4 [160]
-    ;choice = 5 [random-normal 20 5]
-    ;choice = 6 [random-normal 20 5]
-    ;choice = 7 [160]
-    ;choice = 8 [160]
-    ;choice = 9 [random-normal 20 5]
+    ;choice = 0 [480]
+    ;choice = 1 [480]
+    ;choice = 2 [480]
+    ;choice = 3 [480]
+    ;choice = 4 [480]
+    ;choice = 5 [(random-normal 60 15)]
+    ;choice = 6 [(random-normal 60 15)]
+    ;choice = 7 [480]
+    ;choice = 8 [480]
+    ;choice = 9 [(random-normal 60 15)]
     ;)
     ;set choice random 10
     ;set task2(ifelse-value
@@ -600,16 +654,16 @@ end
     ;choice = 9 ["groceries"]
     ;)
     ;set task2t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [160]
-    ;choice = 2 [160]
-    ;choice = 3 [160]
-    ;choice = 4 [160]
-    ;choice = 5 [random-normal 20 5]
-    ;choice = 6 [random-normal 20 5]
-    ;choice = 7 [160]
-    ;choice = 8 [160]
-    ;choice = 9 [random-normal 20 5]
+    ;choice = 0 [480]
+    ;choice = 1 [480]
+    ;choice = 2 [480]
+    ;choice = 3 [480]
+    ;choice = 4 [480]
+    ;choice = 5 [(random-normal 60 15)]
+    ;choice = 6 [(random-normal 60 15)]
+    ;choice = 7 [480]
+    ;choice = 8 [480]
+    ;choice = 9 [(random-normal 60 15)]
     ;)
     ;set choice random 10
     ;set task3(ifelse-value
@@ -625,16 +679,16 @@ end
     ;choice = 9 ["groceries"]
     ;)
     ;set task3t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [160]
-    ;choice = 2 [160]
-    ;choice = 3 [160]
-    ;choice = 4 [160]
-    ;choice = 5 [random-normal 20 5]
-    ;choice = 6 [random-normal 20 5]
-    ;choice = 7 [160]
-    ;choice = 8 [160]
-    ;choice = 9 [random-normal 20 5]
+    ;choice = 0 [480]
+    ;choice = 1 [480]
+    ;choice = 2 [480]
+    ;choice = 3 [480]
+    ;choice = 4 [480]
+    ;choice = 5 [(random-normal 60 15)]
+    ;choice = 6 [(random-normal 60 15)]
+    ;choice = 7 [480]
+    ;choice = 8 [480]
+    ;choice = 9 [(random-normal 60 15)]
     ;)
   ;]
   ;if ordinary-citizen? = true and comorbidity? = true[
@@ -652,16 +706,16 @@ end
     ;choice = 9 ["groceries"]
     ;)
     ;set task1t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [160]
-    ;choice = 2 [160]
-    ;choice = 3 [160]
-    ;choice = 4 [160]
-    ;choice = 5 [random-normal 20 5]
-    ;choice = 6 [random-normal 20 5]
-    ;choice = 7 [random-normal 30 5]
-    ;choice = 8 [160]
-    ;choice = 9 [random-normal 20 5]
+    ;choice = 0 []
+    ;choice = 1 [480]
+    ;choice = 2 [480]
+    ;choice = 3 [480]
+    ;choice = 4 [480]
+    ;choice = 5 [(random-normal 60 15)]
+    ;choice = 6 [(random-normal 60 15)]
+    ;choice = 7 [(random-normal 90 15)]
+    ;choice = 8 [480]
+    ;choice = 9 [(random-normal 60 15)]
     ;)
     ;set choice random 10
     ;set task2(ifelse-value
@@ -677,16 +731,16 @@ end
     ;choice = 9 ["groceries"]
     ;)
     ;set task2t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [160]
-    ;choice = 2 [160]
-    ;choice = 3 [160]
-    ;choice = 4 [160]
-    ;choice = 5 [random-normal 20 5]
-    ;choice = 6 [random-normal 20 5]
-    ;choice = 7 [random-normal 30 5]
-    ;choice = 8 [160]
-    ;choice = 9 [random-normal 20 5]
+    ;choice = 0 [480]
+    ;choice = 1 [480]
+    ;choice = 2 [480]
+    ;choice = 3 [480]
+    ;choice = 4 [480]
+    ;choice = 5 [(random-normal 60 15)]
+    ;choice = 6 [(random-normal 60 15)]
+    ;choice = 7 [(random-normal 90 15)]
+    ;choice = 8 [480]
+    ;choice = 9 [(random-normal 60 15)]
     ;)
     ;set choice random 10
     ;set task3(ifelse-value
@@ -702,16 +756,16 @@ end
     ;choice = 9 ["groceries"]
     ;)
     ;set task3t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [160]
-    ;choice = 2 [160]
-    ;choice = 3 [160]
-    ;choice = 4 [160]
-    ;choice = 5 [random-normal 20 5]
-    ;choice = 6 [random-normal 20 5]
-    ;choice = 7 [random-normal 30 5]
-    ;choice = 8 [160]
-    ;choice = 9 [random-normal 20 5]
+    ;choice = 0 [480]
+    ;choice = 1 [480]
+    ;choice = 2 [480]
+    ;choice = 3 [480]
+    ;choice = 4 [480]
+    ;choice = 5 [(random-normal 60 15)]
+    ;choice = 6 [(random-normal 60 15)]
+    ;choice = 7 [(random-normal 90 15)]
+    ;choice = 8 [480]
+    ;choice = 9 [(random-normal 60 15)]
     ;)
   ;]
   ;if essential-worker? = true and comorbidity? = false [
@@ -722,9 +776,9 @@ end
     ;choice = 2 ["groceries"]
     ;)
     ;set task1t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [random-normal 20 5]
-    ;choice = 2 [160]
+    ;choice = 0 [480]
+    ;choice = 1 [(random-normal 60 15)]
+    ;choice = 2 [480]
     ;)
     ;set choice random 3
     ;set task2(ifelse-value
@@ -733,9 +787,9 @@ end
     ;choice = 2 ["groceries"]
     ;)
     ;set task2t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [random-normal 20 5]
-    ;choice = 2 [160]
+    ;choice = 0 [480]
+    ;choice = 1 [(random-normal 60 15)]
+    ;choice = 2 [480]
     ;)
     ;set choice random 3
     ;set task3(ifelse-value
@@ -744,9 +798,9 @@ end
     ;choice = 2 ["groceries"]
     ;)
     ;set task3t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [random-normal 20 5]
-    ;choice = 2 [160]
+    ;choice = 0 [480]
+    ;choice = 1 [(random-normal 60 15)]
+    ;choice = 2 [480]
     ;)
   ;]
   ;if essential-worker? = true and comorbidity? = true [
@@ -757,9 +811,9 @@ end
     ;choice = 2 ["groceries"]
     ;)
     ;set task1t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [random-normal 20 5]
-    ;choice = 2 [160]
+    ;choice = 0 [480]
+    ;choice = 1 [(random-normal 60 15)]
+    ;choice = 2 [480]
     ;)
     ;set choice random 3
     ;set task2(ifelse-value
@@ -768,9 +822,9 @@ end
     ;choice = 2 ["groceries"]
     ;)
     ;set task2t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [random-normal 20 5]
-    ;choice = 2 [160]
+    ;choice = 0 [480]
+    ;choice = 1 [(random-normal 60 15)]
+    ;choice = 2 [480]
     ;)
     ;set choice random 3
     ;set task3(ifelse-value
@@ -779,9 +833,9 @@ end
     ;choice = 2 ["groceries"]
     ;)
     ;set task3t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [random-normal 20 5]
-    ;choice = 2 [160]
+    ;choice = 0 [480]
+    ;choice = 1 [(random-normal 60 15)]
+    ;choice = 2 [480]
     ;)
   ;]
   ;if healthcare-worker? = true[
@@ -799,16 +853,16 @@ end
     ;choice = 9 ["groceries"]
     ;)
     ;set task1t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [160]
-    ;choice = 2 [160]
-    ;choice = 3 [160]
-    ;choice = 4 [160]
-    ;choice = 5 [160]
-    ;choice = 6 [random-normal 20 5]
-    ;choice = 7 [random-normal 20 5]
-    ;choice = 8 [160]
-    ;choice = 9 [random-normal 20 5]
+    ;choice = 0 [480]
+    ;choice = 1 [480]
+    ;choice = 2 [480]
+    ;choice = 3 [480]
+    ;choice = 4 [480]
+    ;choice = 5 [480]
+    ;choice = 6 [(random-normal 60 15)]
+    ;choice = 7 [(random-normal 60 15)]
+    ;choice = 8 [480]
+    ;choice = 9 [(random-normal 60 15)]
     ;)
     ;set choice random 10
     ;set task2(ifelse-value
@@ -824,16 +878,16 @@ end
     ;choice = 9 ["groceries"]
     ;)
     ;set task2t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [160]
-    ;choice = 2 [160]
-    ;choice = 3 [160]
-    ;choice = 4 [160]
-    ;choice = 5 [160]
-    ;choice = 6 [random-normal 20 5]
-    ;choice = 7 [random-normal 20 5]
-    ;choice = 8 [160]
-    ;choice = 9 [random-normal 20 5]
+    ;choice = 0 [480]
+    ;choice = 1 [480]
+    ;choice = 2 [480]
+    ;choice = 3 [480]
+    ;choice = 4 [480]
+    ;choice = 5 [480]
+    ;choice = 6 [(random-normal 60 15)]
+    ;choice = 7 [(random-normal 60 15)]
+    ;choice = 8 [480]
+    ;choice = 9 [(random-normal 60 15)]
     ;)
     ;set choice random 10
     ;set task3(ifelse-value
@@ -849,16 +903,16 @@ end
     ;choice = 9 ["groceries"]
     ;)
     ;set task3t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [160]
-    ;choice = 2 [160]
-    ;choice = 3 [160]
-    ;choice = 4 [160]
-    ;choice = 5 [160]
-    ;choice = 6 [random-normal 20 5]
-    ;choice = 7 [random-normal 20 5]
-    ;choice = 8 [160]
-    ;choice = 9 [random-normal 20 5]
+    ;choice = 0 [480]
+    ;choice = 1 [480]
+    ;choice = 2 [480]
+    ;choice = 3 [480]
+    ;choice = 4 [480]
+    ;choice = 5 [480]
+    ;choice = 6 [(random-normal 60 15)]
+    ;choice = 7 [(random-normal 60 15)]
+    ;choice = 8 [480]
+    ;choice = 9 [(random-normal 60 15)]
     ;)
   ;]
   ;if severe? = true[
@@ -876,16 +930,16 @@ end
     ;choice = 9 ["stayhome"]
     ;)
     ;set task1t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [160]
-    ;choice = 2 [160]
-    ;choice = 3 [160]
-    ;choice = 4 [160]
-    ;choice = 5 [160]
-    ;choice = 6 [160]
-    ;choice = 7 [160]
-    ;choice = 8 [160]
-    ;choice = 9 [160]
+    ;choice = 0 [480]
+    ;choice = 1 [480]
+    ;choice = 2 [480]
+    ;choice = 3 [480]
+    ;choice = 4 [480]
+    ;choice = 5 [480]
+    ;choice = 6 [480]
+    ;choice = 7 [480]
+    ;choice = 8 [480]
+    ;choice = 9 [480]
     ;)
     ;set choice random 10
     ;set task2(ifelse-value
@@ -901,16 +955,16 @@ end
     ;choice = 9 ["stayhome"]
     ;)
     ;set task2t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [160]
-    ;choice = 2 [160]
-    ;choice = 3 [160]
-    ;choice = 4 [160]
-    ;choice = 5 [160]
-    ;choice = 6 [160]
-    ;choice = 7 [160]
-    ;choice = 8 [160]
-    ;choice = 9 [160]
+    ;choice = 0 [480]
+    ;choice = 1 [480]
+    ;choice = 2 [480]
+    ;choice = 3 [480]
+    ;choice = 4 [480]
+    ;choice = 5 [480]
+    ;choice = 6 [480]
+    ;choice = 7 [480]
+    ;choice = 8 [480]
+    ;choice = 9 [480]
     ;)
     ;set choice random 10
     ;set task3(ifelse-value
@@ -926,16 +980,16 @@ end
     ;choice = 9 ["stayhome"]
     ;)
     ;set task3t(ifelse-value
-    ;choice = 0 [160]
-    ;choice = 1 [160]
-    ;choice = 2 [160]
-    ;choice = 3 [160]
-    ;choice = 4 [160]
-    ;choice = 5 [160]
-    ;choice = 6 [160]
-    ;choice = 7 [160]
-    ;choice = 8 [160]
-    ;choice = 9 [160]
+    ;choice = 0 [480]
+    ;choice = 1 [480]
+    ;choice = 2 [480]
+    ;choice = 3 [480]
+    ;choice = 4 [480]
+    ;choice = 5 [480]
+    ;choice = 6 [480]
+    ;choice = 7 [480]
+    ;choice = 8 [480]
+    ;choice = 9 [480]
     ;)
   ;]
 ;end
@@ -1067,10 +1121,10 @@ to do-task
  ask persons[
     if taskcnt >= 5 [set taskcnt 4]
     set taskt(ifelse-value
-    taskcnt = 1 [task1t]
-    taskcnt = 2 [task2t]
-    taskcnt = 3 [task3t]
-    taskcnt = 4 [320]
+    taskcnt = 1 [task1t / time-var]
+    taskcnt = 2 [task2t / time-var]
+    taskcnt = 3 [task3t / time-var]
+    taskcnt = 4 [960 / time-var]
     )
   set task(ifelse-value
     taskcnt = 1 [task1]
@@ -1092,10 +1146,10 @@ to al01-assign-task
     choice <= 19 ["groceries"]
     )
     set task1t(ifelse-value
-    choice <= 9 [160]
-    choice <= 16 [random-normal 20 5]
-    choice <= 17 [random-normal 20 5]
-    choice <= 19 [random-normal 20 5]
+    choice <= 9 [480]
+    choice <= 16 [(random-normal 60 15)]
+    choice <= 17 [(random-normal 60 15)]
+    choice <= 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task2(ifelse-value
@@ -1105,10 +1159,10 @@ to al01-assign-task
     choice <= 19 ["groceries"]
     )
     set task2t(ifelse-value
-    choice <= 9 [160]
-    choice <= 16 [random-normal 20 5]
-    choice <= 17 [random-normal 20 5]
-    choice <= 19 [random-normal 20 5]
+    choice <= 9 [480]
+    choice <= 16 [(random-normal 60 15)]
+    choice <= 17 [(random-normal 60 15)]
+    choice <= 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task3(ifelse-value
@@ -1118,10 +1172,10 @@ to al01-assign-task
     choice <= 19 ["groceries"]
     )
     set task3t(ifelse-value
-    choice <= 9 [160]
-    choice <= 16 [random-normal 20 5]
-    choice <= 17 [random-normal 20 5]
-    choice <= 19 [random-normal 20 5]
+    choice <= 9 [480]
+    choice <= 16 [(random-normal 60 15)]
+    choice <= 17 [(random-normal 60 15)]
+    choice <= 19 [(random-normal 60 15)]
     )
   ]
 
@@ -1135,10 +1189,10 @@ to al01-assign-task
     choice <= 19 ["groceries"]
     )
     set task1t(ifelse-value
-    choice <= 3 [160]
-    choice <= 9 [random-normal 20 5]
-    choice <= 17 [160]
-    choice <= 19 [random-normal 20 5]
+    choice <= 3 [480]
+    choice <= 9 [(random-normal 60 15)]
+    choice <= 17 [480]
+    choice <= 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task2(ifelse-value
@@ -1148,10 +1202,10 @@ to al01-assign-task
     choice <= 19 ["groceries"]
     )
     set task2t(ifelse-value
-    choice <= 3 [160]
-    choice <= 9 [random-normal 20 5]
-    choice <= 17 [160]
-    choice <= 19 [random-normal 20 5]
+    choice <= 3 [480]
+    choice <= 9 [(random-normal 60 15)]
+    choice <= 17 [480]
+    choice <= 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task3(ifelse-value
@@ -1161,10 +1215,10 @@ to al01-assign-task
     choice <= 19 ["groceries"]
     )
     set task3t(ifelse-value
-    choice <= 3 [160]
-    choice <= 9 [random-normal 20 5]
-    choice <= 17 [160]
-    choice <= 19 [random-normal 20 5]
+    choice <= 3 [480]
+    choice <= 9 [(random-normal 60 15)]
+    choice <= 17 [480]
+    choice <= 19 [(random-normal 60 15)]
     )
   ]
 
@@ -1179,11 +1233,11 @@ to al01-assign-task
     choice <= 19 ["groceries"]
     )
     set task1t(ifelse-value
-    choice <= 3 [160]
-    choice <= 9 [random-normal 20 5]
-    choice <= 10 [random-normal 30 5]
-    choice <= 17 [160]
-    choice <= 19 [random-normal 20 5]
+    choice <= 3 [480]
+    choice <= 9 [(random-normal 60 15)]
+    choice <= 10 [(random-normal 90 15)]
+    choice <= 17 [480]
+    choice <= 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task2(ifelse-value
@@ -1194,11 +1248,11 @@ to al01-assign-task
     choice <= 19 ["groceries"]
     )
     set task2t(ifelse-value
-    choice <= 3 [160]
-    choice <= 9 [random-normal 20 5]
-    choice <= 10 [random-normal 30 5]
-    choice <= 17 [160]
-    choice <= 19 [random-normal 20 5]
+    choice <= 3 [480]
+    choice <= 9 [(random-normal 60 15)]
+    choice <= 10 [(random-normal 90 15)]
+    choice <= 17 [480]
+    choice <= 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task3(ifelse-value
@@ -1209,11 +1263,11 @@ to al01-assign-task
     choice <= 19 ["groceries"]
     )
     set task3t(ifelse-value
-    choice <= 3 [160]
-    choice <= 9 [random-normal 20 5]
-    choice <= 10 [random-normal 30 5]
-    choice <= 17 [160]
-    choice <= 19 [random-normal 20 5]
+    choice <= 3 [480]
+    choice <= 9 [(random-normal 60 15)]
+    choice <= 10 [(random-normal 90 15)]
+    choice <= 17 [480]
+    choice <= 19 [(random-normal 60 15)]
     )
   ]
 
@@ -1226,9 +1280,9 @@ to al01-assign-task
 
     )
     set task1t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
 
     set choice random 3
@@ -1239,9 +1293,9 @@ to al01-assign-task
 
     )
     set task2t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
     set choice random 3
     set task3(ifelse-value
@@ -1251,9 +1305,9 @@ to al01-assign-task
 
     )
     set task3t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
   ]
 
@@ -1266,9 +1320,9 @@ to al01-assign-task
 
     )
     set task1t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
 
     set choice random 3
@@ -1279,9 +1333,9 @@ to al01-assign-task
 
     )
     set task2t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
     set choice random 3
     set task3(ifelse-value
@@ -1291,9 +1345,9 @@ to al01-assign-task
 
     )
     set task3t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
   ]
 
@@ -1306,11 +1360,11 @@ to al01-assign-task
     choice = 9 ["groceries"]
     )
     set task1t(ifelse-value
-    choice <= 5 [160]
-    choice = 6 [random-normal 20 5]
-    choice = 7 [random-normal 20 5]
-    choice = 8 [160]
-    choice = 9 [random-normal 20 5]
+    choice <= 5 [480]
+    choice = 6 [(random-normal 60 15)]
+    choice = 7 [(random-normal 60 15)]
+    choice = 8 [480]
+    choice = 9 [(random-normal 60 15)]
     )
     set choice random 10
     set task2(ifelse-value
@@ -1321,11 +1375,11 @@ to al01-assign-task
     choice = 9 ["groceries"]
     )
     set task2t(ifelse-value
-    choice <= 5 [160]
-    choice = 6 [random-normal 20 5]
-    choice = 7 [random-normal 20 5]
-    choice = 8 [160]
-    choice = 9 [random-normal 20 5]
+    choice <= 5 [480]
+    choice = 6 [(random-normal 60 15)]
+    choice = 7 [(random-normal 60 15)]
+    choice = 8 [480]
+    choice = 9 [(random-normal 60 15)]
     )
     set choice random 10
     set task3(ifelse-value
@@ -1336,11 +1390,11 @@ to al01-assign-task
     choice = 9 ["groceries"]
     )
     set task3t(ifelse-value
-    choice <= 5 [160]
-    choice = 6 [random-normal 20 5]
-    choice = 7 [random-normal 20 5]
-    choice = 8 [160]
-    choice = 9 [random-normal 20 5]
+    choice <= 5 [480]
+    choice = 6 [(random-normal 60 15)]
+    choice = 7 [(random-normal 60 15)]
+    choice = 8 [480]
+    choice = 9 [(random-normal 60 15)]
     )
   ]
 
@@ -1353,7 +1407,7 @@ to al01-assign-task
         choice = 9 ["stayhome"]
       )
       set task1t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
       set choice random 10
       set task2(ifelse-value
@@ -1361,7 +1415,7 @@ to al01-assign-task
         choice = 9 ["stayhome"]
       )
       set task2t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
       set choice random 10
       set task3(ifelse-value
@@ -1369,7 +1423,7 @@ to al01-assign-task
         choice = 9 ["stayhome"]
       )
       set task3t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
     ]
   ]
@@ -1377,13 +1431,13 @@ to al01-assign-task
   if asymptomatic? = true [
     if random 5 > 1 [
       set task1 "stayhome"
-      set task1t 160
+      set task1t 480
 
       set task2 "stayhome"
-      set task2t 160
+      set task2t 480
 
       set task3 "stayhome"
-      set task3t 160
+      set task3t 480
     ]
   ]
 
@@ -1395,7 +1449,7 @@ to al01-assign-task
         choice = 9 ["hospital"]
       )
       set task1t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
       set choice random 10
       set task2(ifelse-value
@@ -1403,7 +1457,7 @@ to al01-assign-task
         choice = 9 ["hospital"]
       )
       set task2t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
       set choice random 10
       set task3(ifelse-value
@@ -1411,7 +1465,7 @@ to al01-assign-task
         choice = 9 ["hospital"]
       )
       set task3t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
     ]
   ]
@@ -1427,10 +1481,10 @@ to al23-assign-task
     choice <= 19 ["groceries"]
     )
     set task1t(ifelse-value
-    choice <= 14 [160]
-    choice <= 16 [random-normal 20 5]
-    choice <= 17 [random-normal 20 5]
-    choice <= 19 [random-normal 20 5]
+    choice <= 14 [480]
+    choice <= 16 [(random-normal 60 15)]
+    choice <= 17 [(random-normal 60 15)]
+    choice <= 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task2(ifelse-value
@@ -1440,10 +1494,10 @@ to al23-assign-task
     choice <= 19 ["groceries"]
     )
     set task2t(ifelse-value
-    choice <= 14 [160]
-    choice <= 16 [random-normal 20 5]
-    choice <= 17 [random-normal 20 5]
-    choice <= 19 [random-normal 20 5]
+    choice <= 14 [480]
+    choice <= 16 [(random-normal 60 15)]
+    choice <= 17 [(random-normal 60 15)]
+    choice <= 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task3(ifelse-value
@@ -1453,10 +1507,10 @@ to al23-assign-task
     choice <= 19 ["groceries"]
     )
     set task3t(ifelse-value
-    choice <= 14 [160]
-    choice <= 16 [random-normal 20 5]
-    choice <= 17 [random-normal 20 5]
-    choice <= 19 [random-normal 20 5]
+    choice <= 14 [480]
+    choice <= 16 [(random-normal 60 15)]
+    choice <= 17 [(random-normal 60 15)]
+    choice <= 19 [(random-normal 60 15)]
     )
   ]
 
@@ -1469,10 +1523,10 @@ to al23-assign-task
     choice <= 19 ["groceries"]
     )
     set task1t(ifelse-value
-    choice <= 9 [160]
-    choice <= 13 [random-normal 20 5]
-    choice <= 17 [160]
-    choice <= 19 [random-normal 20 5]
+    choice <= 9 [480]
+    choice <= 13 [(random-normal 60 15)]
+    choice <= 17 [480]
+    choice <= 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task2(ifelse-value
@@ -1482,10 +1536,10 @@ to al23-assign-task
     choice <= 19 ["groceries"]
     )
     set task2t(ifelse-value
-    choice <= 9 [160]
-    choice <= 13 [random-normal 20 5]
-    choice <= 17 [160]
-    choice <= 19 [random-normal 20 5]
+    choice <= 9 [480]
+    choice <= 13 [(random-normal 60 15)]
+    choice <= 17 [480]
+    choice <= 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task3(ifelse-value
@@ -1495,10 +1549,10 @@ to al23-assign-task
     choice <= 19 ["groceries"]
     )
     set task3t(ifelse-value
-    choice <= 9 [160]
-    choice <= 13 [random-normal 20 5]
-    choice <= 17 [160]
-    choice <= 19 [random-normal 20 5]
+    choice <= 9 [480]
+    choice <= 13 [(random-normal 60 15)]
+    choice <= 17 [480]
+    choice <= 19 [(random-normal 60 15)]
     )
   ]
 
@@ -1512,11 +1566,11 @@ to al23-assign-task
     choice <= 19 ["groceries"]
     )
     set task1t(ifelse-value
-    choice <= 10 [160]
-    choice <= 12 [random-normal 20 5]
-    choice <= 13 [random-normal 30 5]
-    choice <= 17 [160]
-    choice <= 19 [random-normal 20 5]
+    choice <= 10 [480]
+    choice <= 12 [(random-normal 60 15)]
+    choice <= 13 [(random-normal 90 15)]
+    choice <= 17 [480]
+    choice <= 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task2(ifelse-value
@@ -1527,11 +1581,11 @@ to al23-assign-task
     choice <= 19 ["groceries"]
     )
     set task2t(ifelse-value
-    choice <= 10 [160]
-    choice <= 12 [random-normal 20 5]
-    choice <= 13 [random-normal 30 5]
-    choice <= 17 [160]
-    choice <= 19 [random-normal 20 5]
+    choice <= 10 [480]
+    choice <= 12 [(random-normal 60 15)]
+    choice <= 13 [(random-normal 90 15)]
+    choice <= 17 [480]
+    choice <= 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task3(ifelse-value
@@ -1542,11 +1596,11 @@ to al23-assign-task
     choice <= 19 ["groceries"]
     )
     set task3t(ifelse-value
-    choice <= 10 [160]
-    choice <= 12 [random-normal 20 5]
-    choice <= 13 [random-normal 30 5]
-    choice <= 17 [160]
-    choice <= 19 [random-normal 20 5]
+    choice <= 10 [480]
+    choice <= 12 [(random-normal 60 15)]
+    choice <= 13 [(random-normal 90 15)]
+    choice <= 17 [480]
+    choice <= 19 [(random-normal 60 15)]
     )
   ]
 
@@ -1559,9 +1613,9 @@ to al23-assign-task
 
     )
     set task1t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
 
     set choice random 3
@@ -1572,9 +1626,9 @@ to al23-assign-task
 
     )
     set task2t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
     set choice random 3
     set task3(ifelse-value
@@ -1584,9 +1638,9 @@ to al23-assign-task
 
     )
     set task3t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
   ]
 
@@ -1599,9 +1653,9 @@ to al23-assign-task
 
     )
     set task1t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
 
     set choice random 3
@@ -1612,9 +1666,9 @@ to al23-assign-task
 
     )
     set task2t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
     set choice random 3
     set task3(ifelse-value
@@ -1624,9 +1678,9 @@ to al23-assign-task
 
     )
     set task3t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
   ]
 
@@ -1639,11 +1693,11 @@ to al23-assign-task
     choice = 9 ["groceries"]
     )
     set task1t(ifelse-value
-    choice <= 5 [160]
-    choice = 6 [random-normal 20 5]
-    choice = 7 [random-normal 20 5]
-    choice = 8 [160]
-    choice = 9 [random-normal 20 5]
+    choice <= 5 [480]
+    choice = 6 [(random-normal 60 15)]
+    choice = 7 [(random-normal 60 15)]
+    choice = 8 [480]
+    choice = 9 [(random-normal 60 15)]
     )
     set choice random 10
     set task2(ifelse-value
@@ -1654,11 +1708,11 @@ to al23-assign-task
     choice = 9 ["groceries"]
     )
     set task2t(ifelse-value
-    choice <= 5 [160]
-    choice = 6 [random-normal 20 5]
-    choice = 7 [random-normal 20 5]
-    choice = 8 [160]
-    choice = 9 [random-normal 20 5]
+    choice <= 5 [480]
+    choice = 6 [(random-normal 60 15)]
+    choice = 7 [(random-normal 60 15)]
+    choice = 8 [480]
+    choice = 9 [(random-normal 60 15)]
     )
     set choice random 10
     set task3(ifelse-value
@@ -1669,11 +1723,11 @@ to al23-assign-task
     choice = 9 ["groceries"]
     )
     set task3t(ifelse-value
-    choice <= 5 [160]
-    choice = 6 [random-normal 20 5]
-    choice = 7 [random-normal 20 5]
-    choice = 8 [160]
-    choice = 9 [random-normal 20 5]
+    choice <= 5 [480]
+    choice = 6 [(random-normal 60 15)]
+    choice = 7 [(random-normal 60 15)]
+    choice = 8 [480]
+    choice = 9 [(random-normal 60 15)]
     )
   ]
 
@@ -1685,7 +1739,7 @@ to al23-assign-task
         choice = 9 ["stayhome"]
       )
       set task1t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
       set choice random 10
       set task2(ifelse-value
@@ -1693,7 +1747,7 @@ to al23-assign-task
         choice = 9 ["stayhome"]
       )
       set task2t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
       set choice random 10
       set task3(ifelse-value
@@ -1701,7 +1755,7 @@ to al23-assign-task
         choice = 9 ["stayhome"]
       )
       set task3t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
     ]
   ]
@@ -1709,13 +1763,13 @@ to al23-assign-task
   if asymptomatic? = true [
     if random 5 > 1 [
       set task1 "stayhome"
-      set task1t 160
+      set task1t 480
 
       set task2 "stayhome"
-      set task2t 160
+      set task2t 480
 
       set task3 "stayhome"
-      set task3t 160
+      set task3t 480
     ]
   ]
 
@@ -1727,7 +1781,7 @@ to al23-assign-task
         choice = 9 ["hospital"]
       )
       set task1t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
       set choice random 10
       set task2(ifelse-value
@@ -1735,7 +1789,7 @@ to al23-assign-task
         choice = 9 ["hospital"]
       )
       set task2t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
       set choice random 10
       set task3(ifelse-value
@@ -1743,7 +1797,7 @@ to al23-assign-task
         choice = 9 ["hospital"]
       )
       set task3t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
     ]
   ]
@@ -1758,9 +1812,9 @@ to al45-assign-task
     choice <= 19 ["groceries"]
     )
     set task1t(ifelse-value
-    choice <= 17 [160]
-    choice <= 18 [random-normal 20 5]
-    choice = 19 [random-normal 20 5]
+    choice <= 17 [480]
+    choice <= 18 [(random-normal 60 15)]
+    choice = 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task2(ifelse-value
@@ -1769,9 +1823,9 @@ to al45-assign-task
     choice <= 19 ["groceries"]
     )
     set task2t(ifelse-value
-    choice <= 17 [160]
-    choice <= 18 [random-normal 20 5]
-    choice = 19 [random-normal 20 5]
+    choice <= 17 [480]
+    choice <= 18 [(random-normal 60 15)]
+    choice = 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task3(ifelse-value
@@ -1780,9 +1834,9 @@ to al45-assign-task
     choice <= 19 ["groceries"]
     )
     set task3t(ifelse-value
-    choice <= 17 [160]
-    choice <= 18 [random-normal 20 5]
-    choice = 19 [random-normal 20 5]
+    choice <= 17 [480]
+    choice <= 18 [(random-normal 60 15)]
+    choice = 19 [(random-normal 60 15)]
     )
   ]
 
@@ -1793,8 +1847,8 @@ to al45-assign-task
     choice <= 19 ["groceries"]
     )
     set task1t(ifelse-value
-    choice <= 17 [160]
-    choice <= 19 [random-normal 20 5]
+    choice <= 17 [480]
+    choice <= 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task2(ifelse-value
@@ -1802,8 +1856,8 @@ to al45-assign-task
     choice <= 19 ["groceries"]
     )
     set task2t(ifelse-value
-    choice <= 17 [160]
-    choice <= 19 [random-normal 20 5]
+    choice <= 17 [480]
+    choice <= 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task3(ifelse-value
@@ -1811,8 +1865,8 @@ to al45-assign-task
     choice <= 19 ["groceries"]
     )
     set task3t(ifelse-value
-    choice <= 17 [160]
-    choice <= 19 [random-normal 20 5]
+    choice <= 17 [480]
+    choice <= 19 [(random-normal 60 15)]
     )
   ]
 
@@ -1824,9 +1878,9 @@ to al45-assign-task
     choice <= 19 ["groceries"]
     )
     set task1t(ifelse-value
-    choice <= 16 [160]
-    choice <= 17 [random-normal 30 5]
-    choice <= 19 [random-normal 20 5]
+    choice <= 16 [480]
+    choice <= 17 [(random-normal 90 15)]
+    choice <= 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task2(ifelse-value
@@ -1835,9 +1889,9 @@ to al45-assign-task
     choice <= 19 ["groceries"]
     )
     set task2t(ifelse-value
-    choice <= 16 [160]
-    choice <= 17 [random-normal 30 5]
-    choice <= 19 [random-normal 20 5]
+    choice <= 16 [480]
+    choice <= 17 [(random-normal 90 15)]
+    choice <= 19 [(random-normal 60 15)]
     )
     set choice random 20
     set task3(ifelse-value
@@ -1846,9 +1900,9 @@ to al45-assign-task
     choice <= 19 ["groceries"]
     )
     set task3t(ifelse-value
-    choice <= 16 [160]
-    choice <= 17 [random-normal 30 5]
-    choice <= 19 [random-normal 20 5]
+    choice <= 16 [480]
+    choice <= 17 [(random-normal 90 15)]
+    choice <= 19 [(random-normal 60 15)]
     )
   ]
 
@@ -1861,9 +1915,9 @@ to al45-assign-task
 
     )
     set task1t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
 
     set choice random 3
@@ -1874,9 +1928,9 @@ to al45-assign-task
 
     )
     set task2t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
     set choice random 3
     set task3(ifelse-value
@@ -1886,9 +1940,9 @@ to al45-assign-task
 
     )
     set task3t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
   ]
 
@@ -1901,9 +1955,9 @@ to al45-assign-task
 
     )
     set task1t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
 
     set choice random 3
@@ -1914,9 +1968,9 @@ to al45-assign-task
 
     )
     set task2t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
     set choice random 3
     set task3(ifelse-value
@@ -1926,9 +1980,9 @@ to al45-assign-task
 
     )
     set task3t(ifelse-value
-    choice = 0 [160]
-    choice = 1 [random-normal 20 5]
-    choice = 2 [160]
+    choice = 0 [480]
+    choice = 1 [(random-normal 60 15)]
+    choice = 2 [480]
     )
   ]
 
@@ -1941,11 +1995,11 @@ to al45-assign-task
     choice = 9 ["groceries"]
     )
     set task1t(ifelse-value
-    choice <= 5 [160]
-    choice = 6 [random-normal 20 5]
-    choice = 7 [random-normal 20 5]
-    choice = 8 [160]
-    choice = 9 [random-normal 20 5]
+    choice <= 5 [480]
+    choice = 6 [(random-normal 60 15)]
+    choice = 7 [(random-normal 60 15)]
+    choice = 8 [480]
+    choice = 9 [(random-normal 60 15)]
     )
     set choice random 10
     set task2(ifelse-value
@@ -1956,11 +2010,11 @@ to al45-assign-task
     choice = 9 ["groceries"]
     )
     set task2t(ifelse-value
-    choice <= 5 [160]
-    choice = 6 [random-normal 20 5]
-    choice = 7 [random-normal 20 5]
-    choice = 8 [160]
-    choice = 9 [random-normal 20 5]
+    choice <= 5 [480]
+    choice = 6 [(random-normal 60 15)]
+    choice = 7 [(random-normal 60 15)]
+    choice = 8 [480]
+    choice = 9 [(random-normal 60 15)]
     )
     set choice random 10
     set task3(ifelse-value
@@ -1971,11 +2025,11 @@ to al45-assign-task
     choice = 9 ["groceries"]
     )
     set task3t(ifelse-value
-    choice <= 5 [160]
-    choice = 6 [random-normal 20 5]
-    choice = 7 [random-normal 20 5]
-    choice = 8 [160]
-    choice = 9 [random-normal 20 5]
+    choice <= 5 [480]
+    choice = 6 [(random-normal 60 15)]
+    choice = 7 [(random-normal 60 15)]
+    choice = 8 [480]
+    choice = 9 [(random-normal 60 15)]
     )
   ]
 
@@ -1987,7 +2041,7 @@ to al45-assign-task
         choice = 9 ["stayhome"]
       )
       set task1t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
       set choice random 10
       set task2(ifelse-value
@@ -1995,7 +2049,7 @@ to al45-assign-task
         choice = 9 ["stayhome"]
       )
       set task2t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
       set choice random 10
       set task3(ifelse-value
@@ -2003,7 +2057,7 @@ to al45-assign-task
         choice = 9 ["stayhome"]
       )
       set task3t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
     ]
   ]
@@ -2011,13 +2065,13 @@ to al45-assign-task
   if asymptomatic? = true [
     if random 5 > 1 [
       set task1 "stayhome"
-      set task1t 160
+      set task1t 480
 
       set task2 "stayhome"
-      set task2t 160
+      set task2t 480
 
       set task3 "stayhome"
-      set task3t 160
+      set task3t 480
     ]
   ]
 
@@ -2029,7 +2083,7 @@ to al45-assign-task
         choice = 9 ["hospital"]
       )
       set task1t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
       set choice random 10
       set task2(ifelse-value
@@ -2037,7 +2091,7 @@ to al45-assign-task
         choice = 9 ["hospital"]
       )
       set task2t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
       set choice random 10
       set task3(ifelse-value
@@ -2045,7 +2099,7 @@ to al45-assign-task
         choice = 9 ["hospital"]
       )
       set task3t(ifelse-value
-        choice <= 9 [160]
+        choice <= 9 [480]
       )
     ]
   ]
@@ -2074,10 +2128,10 @@ to set-exposed
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
-198
-76
-911
-790
+285
+10
+998
+724
 -1
 -1
 5.0
@@ -2098,7 +2152,7 @@ GRAPHICS-WINDOW
 0
 1
 ticks
-3000.0
+6000.0
 
 BUTTON
 30
@@ -2135,22 +2189,25 @@ NIL
 0
 
 PLOT
-940
-245
-1515
-460
+1620
+510
+1890
+695
 Spread of Disease
-Time
+Days
 Number of Infected
 0.0
 10.0
 0.0
 10.0
 true
-false
+true
 "" ""
 PENS
-"pen-0" 1.0 0 -16777216 true "" "plot active-cases"
+"Asymptomatic" 1.0 0 -13791810 true "" "plotxy days (count persons with [asymptomatic? = true])"
+"Moderate" 1.0 0 -955883 true "" "plotxy days (count persons with [infected? = true and severe? = false and asymptomatic? = false and mild? = false])"
+"Severe" 1.0 0 -2674135 true "" "plotxy days (count persons with [severe? = true])"
+"Mild" 1.0 0 -13840069 true "" "plotxy days (count persons with [mild? = true])"
 
 BUTTON
 175
@@ -2170,32 +2227,21 @@ NIL
 1
 
 INPUTBOX
-30
-385
-180
-445
-base-infection-risk
-0.006
-1
-0
-Number
-
-INPUTBOX
-1388
-26
-1538
-86
+1235
+75
+1340
+135
 mask-wear-percent
-90.0
+95.0
 1
 0
 Number
 
 INPUTBOX
-1388
-86
-1538
-146
+1340
+75
+1490
+135
 mask-wear-faceshield-percent
 80.0
 1
@@ -2220,58 +2266,58 @@ CHOOSER
 225
 tick-represents
 tick-represents
-"3 Minutes" "1 Day" "15 Minutes"
-0
+"3 Minutes" "10 Minutes" "1 Day" "15 Minutes"
+1
 
 INPUTBOX
-938
-86
-1090
-146
-starting-infected
-50.0
+855
+135
+970
+195
+starting-infected-mild
+1.0
 1
 0
 Number
 
 INPUTBOX
-938
-26
-1090
-86
+735
+75
+825
+135
 total-population
-938.0
+1012.0
 1
 0
 Number
 
 INPUTBOX
-1238
-26
-1390
-86
+925
+75
+1050
+135
 healthcare-worker-count
-110.0
+111.0
 1
 0
 Number
 
 INPUTBOX
-1238
-86
-1390
-146
+1120
+75
+1235
+135
 essential-worker-count
-220.0
+222.0
 1
 0
 Number
 
 INPUTBOX
-1088
-26
-1240
-86
+825
+75
+925
+135
 comorbidity-count
 40.0
 1
@@ -2279,10 +2325,10 @@ comorbidity-count
 Number
 
 INPUTBOX
-1088
-86
-1240
-146
+1050
+75
+1120
+135
 senior-count
 40.0
 1
@@ -2290,10 +2336,10 @@ senior-count
 Number
 
 MONITOR
-938
-146
-995
-191
+735
+195
+792
+240
 NIL
 hour
 17
@@ -2306,16 +2352,16 @@ INPUTBOX
 180
 180
 curfew-hours
-0.0
+8.0
 1
 0
 Number
 
 MONITOR
-993
-146
-1050
-191
+790
+195
+847
+240
 NIL
 curfew?
 17
@@ -2323,10 +2369,10 @@ curfew?
 11
 
 PLOT
-940
-460
-1515
-645
+740
+510
+1315
+695
 Daily Chart
 Days
 NIL
@@ -2344,10 +2390,10 @@ PENS
 "Exposed" 1.0 0 -4079321 true "" "plotxy days (count persons with [color = yellow])"
 
 MONITOR
-1048
-146
-1105
-191
+845
+195
+902
+240
 NIL
 days
 17
@@ -2355,10 +2401,10 @@ days
 11
 
 PLOT
-1515
-645
-1820
-800
+1315
+695
+1620
+850
 Daily total cases
 Days
 Total Cases
@@ -2373,10 +2419,10 @@ PENS
 "default" 1.0 0 -16777216 true "" "plotxy days total-cases"
 
 PLOT
-940
-645
-1515
-800
+740
+695
+1315
+850
 Daily Deaths
 Days
 Deaths
@@ -2393,10 +2439,10 @@ PENS
 "Comorbid Death" 1.0 0 -6459832 true "" "plotxy days comorbid-deaths"
 
 PLOT
-1820
-645
-2090
-800
+1620
+695
+1890
+850
 Daily total recoveries
 Days
 Recoveries
@@ -2418,13 +2464,13 @@ CHOOSER
 alert-level
 alert-level
 "None" "Level 1" "Level 2 & 3" "Level 4 & 5" "Auto"
-4
+3
 
 MONITOR
-1420
-200
-1477
-245
+1220
+250
+1277
+295
 NIL
 deaths
 17
@@ -2437,7 +2483,7 @@ INPUTBOX
 180
 560
 healthcare-area
-1500.0
+1470.0
 1
 0
 Number
@@ -2448,7 +2494,7 @@ INPUTBOX
 180
 620
 grocery-area
-3000.0
+2940.0
 1
 0
 Number
@@ -2459,7 +2505,7 @@ INPUTBOX
 180
 680
 commute-area
-3000.0
+2940.0
 1
 0
 Number
@@ -2470,7 +2516,7 @@ INPUTBOX
 180
 740
 workplace-area
-4500.0
+4410.0
 1
 0
 Number
@@ -2481,7 +2527,7 @@ INPUTBOX
 180
 800
 leisure-area
-4500.0
+4410.0
 1
 0
 Number
@@ -2497,10 +2543,10 @@ Area (sq. m)
 1
 
 MONITOR
-1144
-200
-1246
-245
+944
+250
+1046
+295
 Persons infected
 count persons with [infected? = true]
 17
@@ -2508,20 +2554,20 @@ count persons with [infected? = true]
 11
 
 TEXTBOX
-45
-825
-235
-1010
+30
+810
+220
+995
 Grey: Workplace\nViolet: Grocery\nWhite: Hospital\nCyan: Commute\nRed persons: Infected population\nOrange persons: Asymptomatic population\nYellow persons: Exposed population\nGreen persons: Susceptible population\nBlue persons: Vaccinated population
 11
 0.0
 1
 
 MONITOR
-1320
-200
-1420
-245
+1120
+250
+1220
+295
 Reinfected agents
 count persons with [times-infected > 1]
 17
@@ -2529,10 +2575,10 @@ count persons with [times-infected > 1]
 11
 
 MONITOR
-1244
-200
-1321
-245
+1044
+250
+1121
+295
 NIL
 reinfections
 17
@@ -2540,21 +2586,21 @@ reinfections
 11
 
 INPUTBOX
-1538
-26
-1691
-86
+1225
+135
+1330
+195
 starting-vax-percent
-50.0
+35.0
 1
 0
 Number
 
 MONITOR
-1474
-200
-1557
-245
+1274
+250
+1357
+295
 vaccinations
 vaccinations
 17
@@ -2562,10 +2608,10 @@ vaccinations
 11
 
 INPUTBOX
-1538
-86
-1691
-146
+1330
+135
+1490
+195
 vax-per-day
 1.0
 1
@@ -2573,10 +2619,10 @@ vax-per-day
 Number
 
 MONITOR
-939
-200
-1146
-245
+739
+250
+946
+295
 Persons exposed (not sick)
 count persons with [color = yellow]
 17
@@ -2584,12 +2630,12 @@ count persons with [color = yellow]
 11
 
 PLOT
-1515
-245
-2091
-460
+1315
+295
+1891
+510
 Contact Tracing
-Time
+Days
 Infect Count
 0.0
 10.0
@@ -2599,17 +2645,18 @@ true
 true
 "" ""
 PENS
-"Workplace" 1.0 0 -7500403 true "" "plot infect-count-work"
-"Grocery" 1.0 0 -8630108 true "" "plot infect-count-grocery"
-"Commute" 1.0 0 -11221820 true "" "plot infect-count-commute"
-"Hospital" 1.0 0 -2674135 true "" "plot infect-count-hospital"
+"Workplace" 1.0 0 -7500403 true "" "plotxy days infect-count-work"
+"Grocery" 1.0 0 -8630108 true "" "plotxy days infect-count-grocery"
+"Commute" 1.0 0 -11221820 true "" "plotxy days infect-count-commute"
+"Hospital" 1.0 0 -2674135 true "" "plotxy days infect-count-hospital"
 "Leisure" 1.0 0 -5825686 true "" "plotxy days infect-count-leisure"
+"Home" 1.0 0 -16777216 true "" "plotxy days infect-count-else"
 
 MONITOR
-1620
-200
-1682
-245
+1420
+250
+1482
+295
 NIL
 vax-goal
 17
@@ -2617,10 +2664,10 @@ vax-goal
 11
 
 MONITOR
-1555
-200
-1622
-245
+1355
+250
+1422
+295
 NIL
 vax-count
 17
@@ -2634,14 +2681,14 @@ CHOOSER
 330
 vax-type
 vax-type
-"Inactivated" "Viral-Vector" "mRNA"
-2
+"None" "Inactivated" "Viral-Vector" "mRNA" "Average"
+4
 
 MONITOR
-1105
-145
-1210
-190
+900
+195
+965
+240
 Alert Level
 sim-al-name
 17
@@ -2649,10 +2696,10 @@ sim-al-name
 11
 
 PLOT
-1690
-25
-1850
-245
+1490
+75
+1890
+295
 Alert Level Change
 Days
 Alert-Level
@@ -2667,28 +2714,10 @@ PENS
 "" 1.0 0 -16777216 true "" "plotxy days sim-alert-level"
 
 PLOT
-1850
-25
-2090
-245
-Home Contract Tracing
-Time
-Infect Count
-0.0
-10.0
-0.0
-10.0
-true
-false
-"" ""
-PENS
-"Home" 1.0 0 -16777216 true "" "plot infect-count-else"
-
-PLOT
-1515
-460
-2090
-645
+1315
+510
+1620
+695
 Total Vaccinations
 Days
 Vaccinations
@@ -2701,6 +2730,82 @@ false
 "" ""
 PENS
 "Vaccinations" 1.0 0 -16777216 true "" "plotxy days vaccinations"
+
+SLIDER
+30
+330
+180
+363
+pandemic-time
+pandemic-time
+0
+3
+3.0
+1
+1
+NIL
+HORIZONTAL
+
+CHOOSER
+30
+390
+180
+435
+covid-variant
+covid-variant
+"Non-Delta" "Delta"
+1
+
+PLOT
+740
+295
+1315
+510
+Daily Active Cases
+Days
+Active Cases
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"Active Cases" 1.0 0 -16777216 true "" "plotxy days active-cases"
+
+INPUTBOX
+970
+135
+1105
+195
+starting-infected-moderate
+1.0
+1
+0
+Number
+
+INPUTBOX
+735
+135
+855
+195
+starting-infected-asymp
+1.0
+1
+0
+Number
+
+INPUTBOX
+1105
+135
+1225
+195
+starting-infected-severe
+1.0
+1
+0
+Number
 
 @#$#@#$#@
 ## WHAT IS IT?
