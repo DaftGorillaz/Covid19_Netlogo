@@ -8,3 +8,11 @@ Virus.nlogo
 V2.0/
 tests/.ipynb_checkpoints/
 tests/DOH_Data_Drop/
+tests/00 Practice Tests/
+tests/01 Test 1 Runs/
+tests/Region_Mobility_Report/
+tests/Mobility.ipynb
+tests/2021_PH_Region_Mobility_Report.csv
+tests/Global_Mobility_Report.csv
+AICCovid19_Vax_v2_2_old.nlogo
+.AICCovid19_Vax_v2_2.tmp.nlogo

@@ -8,9 +8,6 @@ breed [leisures leisure]
 globals[
   ;sdp ;not used
   maskcnt
-  asymptomatic-chance ;Added by AIC
-  mild-chance
-  severe-chance ;Added by AIC
   recovery
   distribution
   speed
@@ -59,7 +56,6 @@ persons-own [
   social-distancing? ;not really used
   infected?
   asymptomatic? ;Added by AIC
-  mild?
   severe? ;Added by AIC
   mask?
   faceshield?
@@ -73,8 +69,8 @@ persons-own [
   x-home
   task ;can be a string or a switch, will represent where the agent needs to go. current working task
   taskt
-  facility
-  in-facility? ;checks if the patch being stood on is in the facility. Will turn on random movement if within facility
+  ;facility ;not used
+  ;in-facility? ;checks if the patch being stood on is in the facility. Will turn on random movement if within facility ;not used
   task-duration ;the duration of the activity. Visit will be shorter, working there will be longer
   task-time  ;the amount of time that the turtle has actually spent in the facility
   task1
@@ -89,6 +85,8 @@ persons-own [
   ;RQEF ;relative quanta emission factor ;not used
   ;RBRF ;relative breathing rate factor ;not used
   ppe-efficiency
+  relative-asympt-chance
+  relative-severe-chance
   relative-death-chance ;death chance dependent on health category
   recovery-time ;time until recovery
   exposed?
@@ -123,9 +121,8 @@ to setup
     tick-represents = "3 Minutes" [set recovery 6720 set distribution 250 set speed 1 set zerohour 480 set time-var 3]
     tick-represents = "10 Minutes" [set recovery 2016 set distribution 75 set speed 3 set zerohour 144 set time-var 10]
     tick-represents = "15 Minutes" [set recovery 1344 set distribution 288 set speed 5 set zerohour 96 set time-var 15]
-   )
+    )
   ;if tick-represents = "1 Day" [set recovery 14 set distribution 3 set speed 20] ;not used
-  ;if tick-represents = "15 Minutes" [set recovery 1344 set distribution 288 set speed 5 set zerohour 96] ;not used
 
   set curfew? true
   set days 0
@@ -161,10 +158,6 @@ to setup
 
     randomize-spawn
 
-    ;set rand-x random-xcor
-    ;set rand-y random-ycor
-    ;setxy rand-x rand-y
-
     set color green ;all people are originally created as susceptible and non-stationary
     set infectious-time 0
     set social-distancing? false
@@ -177,14 +170,12 @@ to setup
     set ordinary-citizen? false
     set y-home rand-y
     set x-home rand-x
-    ;set task "workplace"
     set taskcnt 1
     set taskt 50
     set recovery-time 0
     set exposed-time 0
     set infected? false ;added by AIC
     set asymptomatic? false ;added by AIC
-    set mild? false
     set severe? false ;added by AIC
     set exposed? false
     set times-infected random pandemic-time ;depending on how where we are in the pandemic, some people may be infected already
@@ -193,22 +184,10 @@ to setup
     set vaccinated? false ;added by AIC
   ]
 
-;  ask n-of random-normal (total-population / 2) 100 persons[
-;    set times-infected random 3
-;  ]
-
   ask n-of starting-infected-asymp persons [
     set infected? true
     set asymptomatic? true
     set color orange
-
-    set recovery-time random-normal recovery distribution
-    ifelse pandemic-time > 0 [set infectious-time random-normal (recovery * 0.66) distribution][set infectious-time 0]
-  ]
-  ask n-of starting-infected-mild persons [
-    set infected? true
-    set mild? true
-    set color red
 
     set recovery-time random-normal recovery distribution
     ifelse pandemic-time > 0 [set infectious-time random-normal (recovery * 0.66) distribution][set infectious-time 0]
@@ -228,7 +207,7 @@ to setup
     set recovery-time random-normal recovery distribution
     ifelse pandemic-time > 0 [set infectious-time random-normal (recovery * 0.66) distribution][set infectious-time 0]
   ] ;begin with some infected people
-  set total-cases (starting-infected-asymp + starting-infected-mild + starting-infected-moderate + starting-infected-severe)
+  set total-cases (starting-infected-asymp + starting-infected-moderate + starting-infected-severe)
   set active-cases total-cases
 
   ask n-of comorbidity-count persons[
@@ -253,14 +232,6 @@ to setup
     set ordinary-citizen? true
   ]
 
-  set vaccinations 0
-  set vax-count 0
-  set vax-goal healthcare-worker-count
-  set vax-group 1
-  ask n-of (total-population * starting-vax-percent / 100) persons with [color != red][
-    vaccinate
-  ] ;added by AIC
-
   ;setting up mask bois
   if alert-level != "None" [
     ;ask n-of ((total-population - starting-infected) * mask-wear-percent / 100) persons with [color != red] [
@@ -278,24 +249,55 @@ to setup
     ;set mask? true
   ]
 
+  set vaccinations 0
+  set vax-count 0
+  set vax-goal healthcare-worker-count
+  set vax-group 1
+  ask n-of (total-population * starting-vax-percent / 100) persons with [vaccinated? = false and infected? = false][
+    vaccinate
+  ] ;added by AIC
+
   al-change
+
+  set comorbid-risk-mod 1.2
+  set senior-risk-mod 1.2
 
   (ifelse
     covid-variant = "Non-Delta" [
       set base-infection-risk 0.006
-      set asymptomatic-chance 0.2 ;added by AIC
-      set mild-chance 0.2;
-      set severe-chance 0.01 ;added by AIC
+      ask persons [
+        ifelse senior? = true[
+          set relative-asympt-chance (0.2 * senior-risk-mod)
+          set relative-severe-chance (0.1 * senior-risk-mod)
+        ][
+          ifelse comorbidity? = true[
+            set relative-asympt-chance (0.2 * comorbid-risk-mod)
+            set relative-severe-chance (0.1 * comorbid-risk-mod)
+          ][
+            set relative-asympt-chance 0.2
+            set relative-severe-chance 0.1
+          ]
+        ]
+      ]
     ]
     covid-variant = "Delta" [
       set base-infection-risk 0.066
-      set asymptomatic-chance 0.05
-      set mild-chance 0.24
-      set severe-chance 0.475
+      ask persons [
+        ifelse senior? = true[
+          set relative-asympt-chance (0.05 * senior-risk-mod)
+          set relative-severe-chance (0.475 * senior-risk-mod)
+        ][
+          ifelse comorbidity? = true[
+            set relative-asympt-chance (0.05 * comorbid-risk-mod)
+            set relative-severe-chance (0.475 * comorbid-risk-mod)
+          ][
+            set relative-asympt-chance 0.05
+            set relative-severe-chance 0.475
+          ]
+        ]
+      ]
     ]
   )
-  set comorbid-risk-mod 1.2
-  set senior-risk-mod 1.2
 
   set-ppe-efficiency
   set-relative-death-chance
@@ -325,10 +327,10 @@ to go
     tick-represents = "3 Minutes" [set hourly 20]
     tick-represents = "10 Minutes" [set hourly 6]
     tick-represents = "15 Minutes" [set hourly 4]
-    )
+  )
 
-   if ticks mod hourly = 0 [set hour (hour + 1)]
-   if hour = 24 [
+  if ticks mod hourly = 0 [set hour (hour + 1)]
+  if hour = 24 [
     vax-priority
     set hour 0
     ask persons [set taskcnt 1]
@@ -386,7 +388,6 @@ to-report nearby-hospitals
   report min-one-of hospitals [distance myself]
 end
 
-
 to set-ppe-efficiency
   ask persons with [healthcare-worker? = true]
   [
@@ -403,19 +404,13 @@ to set-relative-risk
   ask persons [
     ;modifies relative risk based on health category
     set relative-risk (base-infection-risk)
-    if senior? = true [set relative-risk (base-infection-risk * senior-risk-mod)]
-    if comorbidity? = true [set relative-risk (base-infection-risk * comorbid-risk-mod)]
+    ;if senior? = true [set relative-risk (base-infection-risk * senior-risk-mod)]
+    ;if comorbidity? = true [set relative-risk (base-infection-risk * comorbid-risk-mod)]
     ;modifies relative risk based on ppe
     if mask? = true [set relative-risk (relative-risk * (1 - ppe-efficiency))]
     set relative-risk (relative-risk * relative-susceptibility)
   ]
 end
-
-;to check-relative-risk ;removed because it resets relative-risk
-  ;ask persons [
-    ;ifelse exposed? = true [set relative-risk base-infection-risk] [set relative-risk (base-infection-risk / 10)]
-  ;]
-;end
 
 to infect
   ask persons with [infected? = true] [
@@ -447,16 +442,12 @@ end
 
 to get-sick
   set infected? true
-  ifelse random-float 1 < asymptomatic-chance [
+  ifelse random-float 1 < relative-asympt-chance [
     set asymptomatic? true
     set color orange
   ][
     set color red
-    ifelse random-float 1 < mild-chance [
-      set mild? true
-    ][
-      if random-float 1 < severe-chance [set severe? true]
-    ]
+    if random-float 1 < relative-severe-chance [set severe? true]
   ]
 
   set total-cases (total-cases + 1)
@@ -476,16 +467,16 @@ to get-sick
 end
 
 to vax-priority
-  ifelse vax-count < vax-goal [
-    (ifelse
-      vax-group = 1 [ask n-of vax-per-day persons with [healthcare-worker? = true] [vaccinate]]
-      vax-group = 2 [ask n-of vax-per-day persons with [senior? = true] [vaccinate]]
-      vax-group = 3 [ask n-of vax-per-day persons with [comorbidity? = true] [vaccinate]]
-      vax-group = 4 [ask n-of vax-per-day persons with [essential-worker? = true] [vaccinate]]
-      vax-group = 5 [ask n-of vax-per-day persons [vaccinate]]
-      )
-  ][
+  (ifelse
+    vax-group = 1 [ask n-of vax-per-day persons with [healthcare-worker? = true] [vaccinate]]
+    vax-group = 2 [ask n-of vax-per-day persons with [senior? = true] [vaccinate]]
+    vax-group = 3 [ask n-of vax-per-day persons with [comorbidity? = true] [vaccinate]]
+    vax-group = 4 [ask n-of vax-per-day persons with [essential-worker? = true] [vaccinate]]
+    vax-group = 5 [ask n-of vax-per-day persons [vaccinate]]
+  )
+  if vax-count > vax-goal [
     set vax-group (vax-group + 1)
+    if vax-group > 5 [set vax-group 5]
     set vax-goal (ifelse-value
       vax-group = 2 [vax-goal + senior-count]
       vax-group = 3 [vax-goal + comorbidity-count]
@@ -496,7 +487,7 @@ to vax-priority
 end ;added by AIC
 
 to vaccinate
-  if vaccinated? = false and infected? = false[
+  if vaccinated? = false and infected? = false [
     set vaccinated? true
     set vax-efficacy (ifelse-value
       vax-type = "None" [0]
@@ -506,6 +497,8 @@ to vaccinate
       vax-type = "Average" [0.55]
     )
     set relative-risk (relative-risk * (1 - vax-efficacy)) ;modifies relative risk based on vax efficacy
+    set relative-asympt-chance (relative-asympt-chance * (1 + vax-efficacy))
+    set relative-severe-chance (relative-severe-chance * (1 - vax-efficacy))
     set color blue
     set vaccinations (vaccinations + 1)
   ]
@@ -542,7 +535,6 @@ to recover
       set recoveries (recoveries + 1)
       set infected? false
       set asymptomatic? false
-      set mild? false
       set severe? false
       set relative-susceptibility (relative-susceptibility / 5) ;Everytime they get and recover, only 20% to get sick again ;added by AIC
       set relative-risk (relative-risk * relative-susceptibility) ;modifies relative risk based on resistance ;added by AIC
@@ -2128,10 +2120,10 @@ to set-exposed
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
-285
-10
-998
-724
+215
+75
+928
+789
 -1
 -1
 5.0
@@ -2189,9 +2181,9 @@ NIL
 0
 
 PLOT
-1620
+1825
 510
-1890
+2095
 695
 Spread of Disease
 Days
@@ -2205,9 +2197,8 @@ true
 "" ""
 PENS
 "Asymptomatic" 1.0 0 -13791810 true "" "plotxy days (count persons with [asymptomatic? = true])"
-"Moderate" 1.0 0 -955883 true "" "plotxy days (count persons with [infected? = true and severe? = false and asymptomatic? = false and mild? = false])"
+"Moderate" 1.0 0 -955883 true "" "plotxy days (count persons with [infected? = true and severe? = false and asymptomatic? = false])"
 "Severe" 1.0 0 -2674135 true "" "plotxy days (count persons with [severe? = true])"
-"Mild" 1.0 0 -13840069 true "" "plotxy days (count persons with [mild? = true])"
 
 BUTTON
 175
@@ -2227,9 +2218,9 @@ NIL
 1
 
 INPUTBOX
-1235
+1440
 75
-1340
+1545
 135
 mask-wear-percent
 95.0
@@ -2238,9 +2229,9 @@ mask-wear-percent
 Number
 
 INPUTBOX
-1340
+1545
 75
-1490
+1695
 135
 mask-wear-faceshield-percent
 80.0
@@ -2266,24 +2257,13 @@ CHOOSER
 225
 tick-represents
 tick-represents
-"3 Minutes" "10 Minutes" "1 Day" "15 Minutes"
+"3 Minutes" "10 Minutes" "15 Minutes"
 1
 
 INPUTBOX
-855
-135
-970
-195
-starting-infected-mild
-1.0
-1
-0
-Number
-
-INPUTBOX
-735
+940
 75
-825
+1030
 135
 total-population
 1012.0
@@ -2292,9 +2272,9 @@ total-population
 Number
 
 INPUTBOX
-925
+1130
 75
-1050
+1255
 135
 healthcare-worker-count
 111.0
@@ -2303,9 +2283,9 @@ healthcare-worker-count
 Number
 
 INPUTBOX
-1120
+1325
 75
-1235
+1440
 135
 essential-worker-count
 222.0
@@ -2314,9 +2294,9 @@ essential-worker-count
 Number
 
 INPUTBOX
-825
+1030
 75
-925
+1130
 135
 comorbidity-count
 40.0
@@ -2325,9 +2305,9 @@ comorbidity-count
 Number
 
 INPUTBOX
-1050
+1255
 75
-1120
+1325
 135
 senior-count
 40.0
@@ -2336,9 +2316,9 @@ senior-count
 Number
 
 MONITOR
-735
+940
 195
-792
+997
 240
 NIL
 hour
@@ -2358,9 +2338,9 @@ curfew-hours
 Number
 
 MONITOR
-790
+995
 195
-847
+1052
 240
 NIL
 curfew?
@@ -2369,9 +2349,9 @@ curfew?
 11
 
 PLOT
-740
+945
 510
-1315
+1520
 695
 Daily Chart
 Days
@@ -2390,9 +2370,9 @@ PENS
 "Exposed" 1.0 0 -4079321 true "" "plotxy days (count persons with [color = yellow])"
 
 MONITOR
-845
+1050
 195
-902
+1107
 240
 NIL
 days
@@ -2401,9 +2381,9 @@ days
 11
 
 PLOT
-1315
+1520
 695
-1620
+1825
 850
 Daily total cases
 Days
@@ -2419,9 +2399,9 @@ PENS
 "default" 1.0 0 -16777216 true "" "plotxy days total-cases"
 
 PLOT
-740
+945
 695
-1315
+1520
 850
 Daily Deaths
 Days
@@ -2439,9 +2419,9 @@ PENS
 "Comorbid Death" 1.0 0 -6459832 true "" "plotxy days comorbid-deaths"
 
 PLOT
-1620
+1825
 695
-1890
+2095
 850
 Daily total recoveries
 Days
@@ -2467,9 +2447,9 @@ alert-level
 3
 
 MONITOR
-1220
+1425
 250
-1277
+1482
 295
 NIL
 deaths
@@ -2543,9 +2523,9 @@ Area (sq. m)
 1
 
 MONITOR
-944
+1149
 250
-1046
+1251
 295
 Persons infected
 count persons with [infected? = true]
@@ -2564,9 +2544,9 @@ Grey: Workplace\nViolet: Grocery\nWhite: Hospital\nCyan: Commute\nRed persons: I
 1
 
 MONITOR
-1120
+1325
 250
-1220
+1425
 295
 Reinfected agents
 count persons with [times-infected > 1]
@@ -2575,9 +2555,9 @@ count persons with [times-infected > 1]
 11
 
 MONITOR
-1044
+1249
 250
-1121
+1326
 295
 NIL
 reinfections
@@ -2586,20 +2566,20 @@ reinfections
 11
 
 INPUTBOX
-1225
+1430
 135
-1330
+1535
 195
 starting-vax-percent
-35.0
+99.0
 1
 0
 Number
 
 MONITOR
-1274
+1479
 250
-1357
+1562
 295
 vaccinations
 vaccinations
@@ -2608,9 +2588,9 @@ vaccinations
 11
 
 INPUTBOX
-1330
+1535
 135
-1490
+1695
 195
 vax-per-day
 1.0
@@ -2619,9 +2599,9 @@ vax-per-day
 Number
 
 MONITOR
-739
+944
 250
-946
+1151
 295
 Persons exposed (not sick)
 count persons with [color = yellow]
@@ -2630,9 +2610,9 @@ count persons with [color = yellow]
 11
 
 PLOT
-1315
+1520
 295
-1891
+2096
 510
 Contact Tracing
 Days
@@ -2653,9 +2633,9 @@ PENS
 "Home" 1.0 0 -16777216 true "" "plotxy days infect-count-else"
 
 MONITOR
-1420
+1625
 250
-1482
+1687
 295
 NIL
 vax-goal
@@ -2664,9 +2644,9 @@ vax-goal
 11
 
 MONITOR
-1355
+1560
 250
-1422
+1627
 295
 NIL
 vax-count
@@ -2685,9 +2665,9 @@ vax-type
 4
 
 MONITOR
-900
+1105
 195
-965
+1170
 240
 Alert Level
 sim-al-name
@@ -2696,9 +2676,9 @@ sim-al-name
 11
 
 PLOT
-1490
+1695
 75
-1890
+2095
 295
 Alert Level Change
 Days
@@ -2714,9 +2694,9 @@ PENS
 "" 1.0 0 -16777216 true "" "plotxy days sim-alert-level"
 
 PLOT
-1315
+1520
 510
-1620
+1825
 695
 Total Vaccinations
 Days
@@ -2757,9 +2737,9 @@ covid-variant
 1
 
 PLOT
-740
+945
 295
-1315
+1520
 510
 Daily Active Cases
 Days
@@ -2775,9 +2755,9 @@ PENS
 "Active Cases" 1.0 0 -16777216 true "" "plotxy days active-cases"
 
 INPUTBOX
-970
+1175
 135
-1105
+1310
 195
 starting-infected-moderate
 1.0
@@ -2786,9 +2766,9 @@ starting-infected-moderate
 Number
 
 INPUTBOX
-735
+940
 135
-855
+1060
 195
 starting-infected-asymp
 1.0
@@ -2797,9 +2777,9 @@ starting-infected-asymp
 Number
 
 INPUTBOX
-1105
+1310
 135
-1225
+1430
 195
 starting-infected-severe
 1.0
