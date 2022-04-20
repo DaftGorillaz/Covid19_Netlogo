@@ -14,5 +14,6 @@ tests/Region_Mobility_Report/
 tests/Mobility.ipynb
 tests/2021_PH_Region_Mobility_Report.csv
 tests/Global_Mobility_Report.csv
+tests/02 New Code/
 AICCovid19_Vax_v2_2_old.nlogo
 .AICCovid19_Vax_v2_2.tmp.nlogo
