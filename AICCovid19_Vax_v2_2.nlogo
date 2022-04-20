@@ -6,7 +6,6 @@ breed [workplaces workplace]
 breed [leisures leisure]
 
 globals[
-  ;sdp ;not used
   maskcnt
   recovery
   distribution
@@ -26,7 +25,6 @@ globals[
   recoveries
   senior-deaths
   comorbid-deaths
-  q-task
   grocery-radius
   commute-radius
   healthcare-radius
@@ -53,7 +51,6 @@ globals[
 
 persons-own [
   infectious-time
-  social-distancing? ;not really used
   infected?
   asymptomatic? ;Added by AIC
   severe? ;Added by AIC
@@ -90,10 +87,9 @@ persons-own [
   relative-death-chance ;death chance dependent on health category
   recovery-time ;time until recovery
   exposed?
-  exposed-time
+  past-exposure?
   times-infected
   ;immune? ;immunity replaced with resistance
-  relative-susceptibility
   vaccinated? ;added by AIC
   vax-efficacy ;added by AIC
 ]
@@ -118,9 +114,9 @@ end
 
 to setup
   (ifelse
-    tick-represents = "3 Minutes" [set recovery 6720 set distribution 250 set speed 1 set zerohour 480 set time-var 3]
-    tick-represents = "10 Minutes" [set recovery 2016 set distribution 75 set speed 3 set zerohour 144 set time-var 10]
-    tick-represents = "15 Minutes" [set recovery 1344 set distribution 288 set speed 5 set zerohour 96 set time-var 15]
+    tick-represents = "3 Minutes" [set recovery 6720 set distribution 250 set speed 1 set zerohour 480 set time-var 3 set hourly 20]
+    tick-represents = "10 Minutes" [set recovery 2016 set distribution 75 set speed 3 set zerohour 144 set time-var 10 set hourly 6]
+    tick-represents = "15 Minutes" [set recovery 1344 set distribution 288 set speed 5 set zerohour 96 set time-var 15 set hourly 4]
     )
   ;if tick-represents = "1 Day" [set recovery 14 set distribution 3 set speed 20] ;not used
 
@@ -160,7 +156,6 @@ to setup
 
     set color green ;all people are originally created as susceptible and non-stationary
     set infectious-time 0
-    set social-distancing? false
     set mask? false
     set faceshield? false
     set comorbidity? false
@@ -173,15 +168,15 @@ to setup
     set taskcnt 1
     set taskt 50
     set recovery-time 0
-    set exposed-time 0
     set infected? false ;added by AIC
     set asymptomatic? false ;added by AIC
     set severe? false ;added by AIC
     set exposed? false
+    set past-exposure? true
     set times-infected random pandemic-time ;depending on how where we are in the pandemic, some people may be infected already
     ;set immune? false ;added by AIC
-    set relative-susceptibility ( ( 1 / 5 ) ^ times-infected )
     set vaccinated? false ;added by AIC
+    set vax-efficacy 0
   ]
 
   ask n-of starting-infected-asymp persons [
@@ -218,12 +213,10 @@ to setup
     set senior? true
   ]
 
-  ;ask n-of healthcare-worker-count persons with [social-distancing? = false and senior? = false] [
   ask n-of healthcare-worker-count persons with [senior? = false] [
     set healthcare-worker? true
   ]
 
-  ;ask n-of essential-worker-count persons with [social-distancing? = false and healthcare-worker? = false and senior? = false][
   ask n-of essential-worker-count persons with [healthcare-worker? = false and senior? = false][
    set essential-worker? true
   ]
@@ -249,14 +242,6 @@ to setup
     ;set mask? true
   ]
 
-  set vaccinations 0
-  set vax-count 0
-  set vax-goal healthcare-worker-count
-  set vax-group 1
-  ask n-of (total-population * starting-vax-percent / 100) persons with [vaccinated? = false and infected? = false][
-    vaccinate
-  ] ;added by AIC
-
   al-change
 
   set comorbid-risk-mod 1.2
@@ -266,15 +251,13 @@ to setup
     covid-variant = "Non-Delta" [
       set base-infection-risk 0.006
       ask persons [
+        set relative-asympt-chance 0.2
         ifelse senior? = true[
-          set relative-asympt-chance (0.2 * senior-risk-mod)
           set relative-severe-chance (0.1 * senior-risk-mod)
         ][
           ifelse comorbidity? = true[
-            set relative-asympt-chance (0.2 * comorbid-risk-mod)
             set relative-severe-chance (0.1 * comorbid-risk-mod)
           ][
-            set relative-asympt-chance 0.2
             set relative-severe-chance 0.1
           ]
         ]
@@ -283,15 +266,13 @@ to setup
     covid-variant = "Delta" [
       set base-infection-risk 0.066
       ask persons [
+        set relative-asympt-chance 0.05
         ifelse senior? = true[
-          set relative-asympt-chance (0.05 * senior-risk-mod)
           set relative-severe-chance (0.475 * senior-risk-mod)
         ][
           ifelse comorbidity? = true[
-            set relative-asympt-chance (0.05 * comorbid-risk-mod)
             set relative-severe-chance (0.475 * comorbid-risk-mod)
           ][
-            set relative-asympt-chance 0.05
             set relative-severe-chance 0.475
           ]
         ]
@@ -302,6 +283,13 @@ to setup
   set-ppe-efficiency
   set-relative-death-chance
   set-relative-risk
+
+  set vaccinations 0
+  set vax-count 0
+  set vax-goal healthcare-worker-count
+  set vax-group 1
+  repeat (total-population * starting-vax-percent / 100) [vax-priority] ;added by AIC
+
   reset-ticks
 end
 
@@ -309,10 +297,10 @@ to go
   ;to remember the user-defined social distancing percentage
   ;set sdp social-distancing-percentage
   move
+  set-exposed
   infect
   recover
   count-deaths
-  set-exposed
   ;stop the simulation and plot when there are no more infected people
   if not any? persons with [infected? = true] [stop]
   if maximum-days != 0 [if (days - 1) >= maximum-days [stop]]
@@ -322,12 +310,6 @@ to go
     set days days + 1
   ]
   ;setting clock
-
-  (ifelse
-    tick-represents = "3 Minutes" [set hourly 20]
-    tick-represents = "10 Minutes" [set hourly 6]
-    tick-represents = "15 Minutes" [set hourly 4]
-  )
 
   if ticks mod hourly = 0 [set hour (hour + 1)]
   if hour = 24 [
@@ -341,7 +323,7 @@ to go
   ][
     set curfew? false
   ]
-  ;check-relative-risk
+
   commuting
   workplacing
   grocerying
@@ -404,11 +386,11 @@ to set-relative-risk
   ask persons [
     ;modifies relative risk based on health category
     set relative-risk (base-infection-risk)
-    ;if senior? = true [set relative-risk (base-infection-risk * senior-risk-mod)]
-    ;if comorbidity? = true [set relative-risk (base-infection-risk * comorbid-risk-mod)]
     ;modifies relative risk based on ppe
     if mask? = true [set relative-risk (relative-risk * (1 - ppe-efficiency))]
-    set relative-risk (relative-risk * relative-susceptibility)
+    repeat times-infected [
+      set relative-risk (relative-risk / 2)
+    ]
   ]
 end
 
@@ -489,17 +471,18 @@ end ;added by AIC
 to vaccinate
   if vaccinated? = false and infected? = false [
     set vaccinated? true
+    set color blue
     set vax-efficacy (ifelse-value
       vax-type = "None" [0]
-      vax-type = "mRNA" [0.85]
-      vax-type = "Viral-Vector" [0.7]
       vax-type = "Inactivated" [0.42]
+      vax-type = "Viral-Vector" [0.7]
+      vax-type = "mRNA" [0.85]
       vax-type = "Average" [0.55]
     )
     set relative-risk (relative-risk * (1 - vax-efficacy)) ;modifies relative risk based on vax efficacy
     set relative-asympt-chance (relative-asympt-chance * (1 + vax-efficacy))
     set relative-severe-chance (relative-severe-chance * (1 - vax-efficacy))
-    set color blue
+    set relative-death-chance 0
     set vaccinations (vaccinations + 1)
   ]
   set vax-count (vax-count + 1)
@@ -515,9 +498,6 @@ to set-relative-death-chance
   ask persons with [comorbidity? = True][
     set relative-death-chance 0.06
   ]
-  ask persons with [vaccinated? = True][
-    set relative-death-chance 0
-  ] ;added by AIC
 end
 
 to recover
@@ -525,10 +505,10 @@ to recover
     ;infected people recover after some number of days drawn from a normal distribution
     if infectious-time >= recovery-time [
       ifelse severe? = true [
-        if random-float 1 < (relative-death-chance * 1.05) [die] ;more likely to die if severe
+        if random-float 1 < (relative-death-chance * 1.05) [set color grey die] ;more likely to die if severe
       ][
         if asymptomatic? = false [
-          if random-float 1 < relative-death-chance [die]
+          if random-float 1 < relative-death-chance [set color grey die]
         ]
       ]
       set active-cases (active-cases - 1)
@@ -536,11 +516,7 @@ to recover
       set infected? false
       set asymptomatic? false
       set severe? false
-      set relative-susceptibility (relative-susceptibility / 5) ;Everytime they get and recover, only 20% to get sick again ;added by AIC
-      set relative-risk (relative-risk * relative-susceptibility) ;modifies relative risk based on resistance ;added by AIC
-      ;if mask? = false and faceshield? = false [set color green]
-      ;if mask? = true and faceshield? = false [set shape "maskman" set color green]
-      ;if mask? = true and faceshield? = true [set shape "shieldman" set color green]
+      set relative-risk (relative-risk / 2) ;Everytime they get sick and recover, smaller chance to get sick again ;added by AIC
       ifelse vaccinated? = true [set color blue][set color green] ;added by AIC
       set infectious-time 0
     ]
@@ -590,401 +566,6 @@ to recolor-patch
   if leisure-patch? = true
   [set pcolor magenta]
 end
-
-;to random-move 480
-  ;ask persons with [social-distancing? = false and task != "stayhome"]
-  ;ask persons with [infected? = false and task != "stayhome"]
-  ;ask persons with [task != "stayhome"] [
-    ;right random 360
-    ;forward speed
-  ;]
-;end
-
-;to assign-tasks ;not used
-  ;if senior? = true [
-    ;ifelse random 20 < 19[set task1 "stayhome" set task1t 480] [set task1 "commute" set task1t (random-normal 60 15)]
-    ;ifelse random 20 < 19[set task2 "stayhome" set task2t 480] [set task2 "commute" set task2t (random-normal 60 15)]
-    ;ifelse random 20 < 19[set task3 "stayhome" set task3t 480] [set task3 "commute" set task3t (random-normal 60 15)]
-  ;]
-  ;if ordinary-citizen? = true and comorbidity? = false and senior? = false [
-    ;let choice random 10
-    ;set task1(ifelse-value
-    ;choice = 0 ["stayhome"]
-    ;choice = 1 ["stayhome"]
-    ;choice = 2 ["stayhome"]
-    ;choice = 3 ["stayhome"]
-    ;choice = 4 ["stayhome"]
-    ;choice = 5 ["commute"]
-    ;choice = 6 ["commute"]
-    ;choice = 7 ["workplace"]
-    ;choice = 8 ["workplace"]
-    ;choice = 9 ["groceries"]
-    ;)
-    ;set task1t(ifelse-value
-    ;choice = 0 [480]
-    ;choice = 1 [480]
-    ;choice = 2 [480]
-    ;choice = 3 [480]
-    ;choice = 4 [480]
-    ;choice = 5 [(random-normal 60 15)]
-    ;choice = 6 [(random-normal 60 15)]
-    ;choice = 7 [480]
-    ;choice = 8 [480]
-    ;choice = 9 [(random-normal 60 15)]
-    ;)
-    ;set choice random 10
-    ;set task2(ifelse-value
-    ;choice = 0 ["stayhome"]
-    ;choice = 1 ["stayhome"]
-    ;choice = 2 ["stayhome"]
-    ;choice = 3 ["stayhome"]
-    ;choice = 4 ["stayhome"]
-    ;choice = 5 ["commute"]
-    ;choice = 6 ["commute"]
-    ;choice = 7 ["workplace"]
-    ;choice = 8 ["workplace"]
-    ;choice = 9 ["groceries"]
-    ;)
-    ;set task2t(ifelse-value
-    ;choice = 0 [480]
-    ;choice = 1 [480]
-    ;choice = 2 [480]
-    ;choice = 3 [480]
-    ;choice = 4 [480]
-    ;choice = 5 [(random-normal 60 15)]
-    ;choice = 6 [(random-normal 60 15)]
-    ;choice = 7 [480]
-    ;choice = 8 [480]
-    ;choice = 9 [(random-normal 60 15)]
-    ;)
-    ;set choice random 10
-    ;set task3(ifelse-value
-    ;choice = 0 ["stayhome"]
-    ;choice = 1 ["stayhome"]
-    ;choice = 2 ["stayhome"]
-    ;choice = 3 ["stayhome"]
-    ;choice = 4 ["stayhome"]
-    ;choice = 5 ["commute"]
-    ;choice = 6 ["commute"]
-    ;choice = 7 ["workplace"]
-    ;choice = 8 ["workplace"]
-    ;choice = 9 ["groceries"]
-    ;)
-    ;set task3t(ifelse-value
-    ;choice = 0 [480]
-    ;choice = 1 [480]
-    ;choice = 2 [480]
-    ;choice = 3 [480]
-    ;choice = 4 [480]
-    ;choice = 5 [(random-normal 60 15)]
-    ;choice = 6 [(random-normal 60 15)]
-    ;choice = 7 [480]
-    ;choice = 8 [480]
-    ;choice = 9 [(random-normal 60 15)]
-    ;)
-  ;]
-  ;if ordinary-citizen? = true and comorbidity? = true[
-    ;let choice random 10
-    ;set task1(ifelse-value
-    ;choice = 0 ["stayhome"]
-    ;choice = 1 ["stayhome"]
-    ;choice = 2 ["stayhome"]
-    ;choice = 3 ["stayhome"]
-    ;choice = 4 ["stayhome"]
-    ;choice = 5 ["commute"]
-    ;choice = 6 ["commute"]
-    ;choice = 7 ["hospital"]
-    ;choice = 8 ["workplace"]
-    ;choice = 9 ["groceries"]
-    ;)
-    ;set task1t(ifelse-value
-    ;choice = 0 []
-    ;choice = 1 [480]
-    ;choice = 2 [480]
-    ;choice = 3 [480]
-    ;choice = 4 [480]
-    ;choice = 5 [(random-normal 60 15)]
-    ;choice = 6 [(random-normal 60 15)]
-    ;choice = 7 [(random-normal 90 15)]
-    ;choice = 8 [480]
-    ;choice = 9 [(random-normal 60 15)]
-    ;)
-    ;set choice random 10
-    ;set task2(ifelse-value
-    ;choice = 0 ["stayhome"]
-    ;choice = 1 ["stayhome"]
-    ;choice = 2 ["stayhome"]
-    ;choice = 3 ["stayhome"]
-    ;choice = 4 ["stayhome"]
-    ;choice = 5 ["commute"]
-    ;choice = 6 ["commute"]
-    ;choice = 7 ["hospital"]
-    ;choice = 8 ["workplace"]
-    ;choice = 9 ["groceries"]
-    ;)
-    ;set task2t(ifelse-value
-    ;choice = 0 [480]
-    ;choice = 1 [480]
-    ;choice = 2 [480]
-    ;choice = 3 [480]
-    ;choice = 4 [480]
-    ;choice = 5 [(random-normal 60 15)]
-    ;choice = 6 [(random-normal 60 15)]
-    ;choice = 7 [(random-normal 90 15)]
-    ;choice = 8 [480]
-    ;choice = 9 [(random-normal 60 15)]
-    ;)
-    ;set choice random 10
-    ;set task3(ifelse-value
-    ;choice = 0 ["stayhome"]
-    ;choice = 1 ["stayhome"]
-    ;choice = 2 ["stayhome"]
-    ;choice = 3 ["stayhome"]
-    ;choice = 4 ["stayhome"]
-    ;choice = 5 ["commute"]
-    ;choice = 6 ["commute"]
-    ;choice = 7 ["hospital"]
-    ;choice = 8 ["workplace"]
-    ;choice = 9 ["groceries"]
-    ;)
-    ;set task3t(ifelse-value
-    ;choice = 0 [480]
-    ;choice = 1 [480]
-    ;choice = 2 [480]
-    ;choice = 3 [480]
-    ;choice = 4 [480]
-    ;choice = 5 [(random-normal 60 15)]
-    ;choice = 6 [(random-normal 60 15)]
-    ;choice = 7 [(random-normal 90 15)]
-    ;choice = 8 [480]
-    ;choice = 9 [(random-normal 60 15)]
-    ;)
-  ;]
-  ;if essential-worker? = true and comorbidity? = false [
-   ;let choice random 3
-    ;set task1(ifelse-value
-    ;choice = 0 ["stayhome"]
-    ;choice = 1 ["commute"]
-    ;choice = 2 ["groceries"]
-    ;)
-    ;set task1t(ifelse-value
-    ;choice = 0 [480]
-    ;choice = 1 [(random-normal 60 15)]
-    ;choice = 2 [480]
-    ;)
-    ;set choice random 3
-    ;set task2(ifelse-value
-    ;choice = 0 ["stayhome"]
-    ;choice = 1 ["commute"]
-    ;choice = 2 ["groceries"]
-    ;)
-    ;set task2t(ifelse-value
-    ;choice = 0 [480]
-    ;choice = 1 [(random-normal 60 15)]
-    ;choice = 2 [480]
-    ;)
-    ;set choice random 3
-    ;set task3(ifelse-value
-    ;choice = 0 ["stayhome"]
-    ;choice = 1 ["commute"]
-    ;choice = 2 ["groceries"]
-    ;)
-    ;set task3t(ifelse-value
-    ;choice = 0 [480]
-    ;choice = 1 [(random-normal 60 15)]
-    ;choice = 2 [480]
-    ;)
-  ;]
-  ;if essential-worker? = true and comorbidity? = true [
-   ;let choice random 3
-    ;set task1(ifelse-value
-    ;choice = 0 ["stayhome"]
-    ;choice = 1 ["commute"]
-    ;choice = 2 ["groceries"]
-    ;)
-    ;set task1t(ifelse-value
-    ;choice = 0 [480]
-    ;choice = 1 [(random-normal 60 15)]
-    ;choice = 2 [480]
-    ;)
-    ;set choice random 3
-    ;set task2(ifelse-value
-    ;choice = 0 ["stayhome"]
-    ;choice = 1 ["commute"]
-    ;choice = 2 ["groceries"]
-    ;)
-    ;set task2t(ifelse-value
-    ;choice = 0 [480]
-    ;choice = 1 [(random-normal 60 15)]
-    ;choice = 2 [480]
-    ;)
-    ;set choice random 3
-    ;set task3(ifelse-value
-    ;choice = 0 ["stayhome"]
-    ;choice = 1 ["commute"]
-    ;choice = 2 ["groceries"]
-    ;)
-    ;set task3t(ifelse-value
-    ;choice = 0 [480]
-    ;choice = 1 [(random-normal 60 15)]
-    ;choice = 2 [480]
-    ;)
-  ;]
-  ;if healthcare-worker? = true[
-    ;let choice random 10
-    ;set task1(ifelse-value
-    ;choice = 0 ["hospital"]
-    ;choice = 1 ["hospital"]
-    ;choice = 2 ["hospital"]
-    ;choice = 3 ["hospital"]
-    ;choice = 4 ["hospital"]
-    ;choice = 5 ["hospital"]
-    ;choice = 6 ["commute"]
-    ;choice = 7 ["commute"]
-    ;choice = 8 ["stayhome"]
-    ;choice = 9 ["groceries"]
-    ;)
-    ;set task1t(ifelse-value
-    ;choice = 0 [480]
-    ;choice = 1 [480]
-    ;choice = 2 [480]
-    ;choice = 3 [480]
-    ;choice = 4 [480]
-    ;choice = 5 [480]
-    ;choice = 6 [(random-normal 60 15)]
-    ;choice = 7 [(random-normal 60 15)]
-    ;choice = 8 [480]
-    ;choice = 9 [(random-normal 60 15)]
-    ;)
-    ;set choice random 10
-    ;set task2(ifelse-value
-    ;choice = 0 ["hospital"]
-    ;choice = 1 ["hospital"]
-    ;choice = 2 ["hospital"]
-    ;choice = 3 ["hospital"]
-    ;choice = 4 ["hospital"]
-    ;choice = 5 ["hospital"]
-    ;choice = 6 ["commute"]
-    ;choice = 7 ["commute"]
-    ;choice = 8 ["stayhome"]
-    ;choice = 9 ["groceries"]
-    ;)
-    ;set task2t(ifelse-value
-    ;choice = 0 [480]
-    ;choice = 1 [480]
-    ;choice = 2 [480]
-    ;choice = 3 [480]
-    ;choice = 4 [480]
-    ;choice = 5 [480]
-    ;choice = 6 [(random-normal 60 15)]
-    ;choice = 7 [(random-normal 60 15)]
-    ;choice = 8 [480]
-    ;choice = 9 [(random-normal 60 15)]
-    ;)
-    ;set choice random 10
-    ;set task3(ifelse-value
-    ;choice = 0 ["hospital"]
-    ;choice = 1 ["hospital"]
-    ;choice = 2 ["hospital"]
-    ;choice = 3 ["hospital"]
-    ;choice = 4 ["hospital"]
-    ;choice = 5 ["hospital"]
-    ;choice = 6 ["commute"]
-    ;choice = 7 ["commute"]
-    ;choice = 8 ["stayhome"]
-    ;choice = 9 ["groceries"]
-    ;)
-    ;set task3t(ifelse-value
-    ;choice = 0 [480]
-    ;choice = 1 [480]
-    ;choice = 2 [480]
-    ;choice = 3 [480]
-    ;choice = 4 [480]
-    ;choice = 5 [480]
-    ;choice = 6 [(random-normal 60 15)]
-    ;choice = 7 [(random-normal 60 15)]
-    ;choice = 8 [480]
-    ;choice = 9 [(random-normal 60 15)]
-    ;)
-  ;]
-  ;if severe? = true[
-    ;let choice random 10
-    ;set task1(ifelse-value
-    ;choice = 0 ["hospital"]
-    ;choice = 1 ["hospital"]
-    ;choice = 2 ["hospital"]
-    ;choice = 3 ["hospital"]
-    ;choice = 4 ["hospital"]
-    ;choice = 5 ["hospital"]
-    ;choice = 6 ["hospital"]
-    ;choice = 7 ["hospital"]
-    ;choice = 8 ["hospital"]
-    ;choice = 9 ["stayhome"]
-    ;)
-    ;set task1t(ifelse-value
-    ;choice = 0 [480]
-    ;choice = 1 [480]
-    ;choice = 2 [480]
-    ;choice = 3 [480]
-    ;choice = 4 [480]
-    ;choice = 5 [480]
-    ;choice = 6 [480]
-    ;choice = 7 [480]
-    ;choice = 8 [480]
-    ;choice = 9 [480]
-    ;)
-    ;set choice random 10
-    ;set task2(ifelse-value
-    ;choice = 0 ["hospital"]
-    ;choice = 1 ["hospital"]
-    ;choice = 2 ["hospital"]
-    ;choice = 3 ["hospital"]
-    ;choice = 4 ["hospital"]
-    ;choice = 5 ["hospital"]
-    ;choice = 6 ["hospital"]
-    ;choice = 7 ["hospital"]
-    ;choice = 8 ["hospital"]
-    ;choice = 9 ["stayhome"]
-    ;)
-    ;set task2t(ifelse-value
-    ;choice = 0 [480]
-    ;choice = 1 [480]
-    ;choice = 2 [480]
-    ;choice = 3 [480]
-    ;choice = 4 [480]
-    ;choice = 5 [480]
-    ;choice = 6 [480]
-    ;choice = 7 [480]
-    ;choice = 8 [480]
-    ;choice = 9 [480]
-    ;)
-    ;set choice random 10
-    ;set task3(ifelse-value
-    ;choice = 0 ["hospital"]
-    ;choice = 1 ["hospital"]
-    ;choice = 2 ["hospital"]
-    ;choice = 3 ["hospital"]
-    ;choice = 4 ["hospital"]
-    ;choice = 5 ["hospital"]
-    ;choice = 6 ["hospital"]
-    ;choice = 7 ["hospital"]
-    ;choice = 8 ["hospital"]
-    ;choice = 9 ["stayhome"]
-    ;)
-    ;set task3t(ifelse-value
-    ;choice = 0 [480]
-    ;choice = 1 [480]
-    ;choice = 2 [480]
-    ;choice = 3 [480]
-    ;choice = 4 [480]
-    ;choice = 5 [480]
-    ;choice = 6 [480]
-    ;choice = 7 [480]
-    ;choice = 8 [480]
-    ;choice = 9 [480]
-    ;)
-  ;]
-;end
 
 to commuting
   ask persons with [task = "commute"] [
@@ -2113,17 +1694,29 @@ end
 
 to set-exposed
   ask persons with [infected? = false][
-    if any? persons with [infected? = true] in-radius 1.33 [set exposed-time (exposed-time + 1)]
-    ifelse exposed-time >= 5 [set exposed? true set color yellow][set exposed? false ifelse vaccinated? = true [set color blue][set color green]]
-    if not any? persons with [infected? = true] in-radius 1 [if exposed-time > 0 [set exposed-time (exposed-time - 1)]]
+    ifelse any? persons with [infected? = true] in-radius 1.33 [
+      set exposed? true
+      set color yellow
+      if past-exposure? != exposed?[
+        set past-exposure? exposed?
+        set relative-risk (relative-risk * 10)
+      ]
+    ][
+      set exposed? false
+      ifelse vaccinated? = true [set color blue][set color green]
+      if past-exposure? != exposed?[
+        set past-exposure? exposed?
+        set relative-risk (relative-risk / 10)
+      ]
+    ]
   ]
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
 215
 75
-928
-789
+978
+839
 -1
 -1
 5.0
@@ -2136,10 +1729,10 @@ GRAPHICS-WINDOW
 0
 0
 1
--70
-70
--70
-70
+-75
+75
+-75
+75
 0
 0
 1
@@ -2181,9 +1774,9 @@ NIL
 0
 
 PLOT
-1825
+1870
 510
-2095
+2140
 695
 Spread of Disease
 Days
@@ -2218,9 +1811,9 @@ NIL
 1
 
 INPUTBOX
-1440
+1485
 75
-1545
+1590
 135
 mask-wear-percent
 95.0
@@ -2229,9 +1822,9 @@ mask-wear-percent
 Number
 
 INPUTBOX
-1545
+1590
 75
-1695
+1740
 135
 mask-wear-faceshield-percent
 80.0
@@ -2261,64 +1854,64 @@ tick-represents
 1
 
 INPUTBOX
-940
+985
 75
-1030
+1075
 135
 total-population
-1012.0
+1072.0
 1
 0
 Number
 
 INPUTBOX
-1130
+1175
 75
-1255
+1300
 135
 healthcare-worker-count
-111.0
+118.0
 1
 0
 Number
 
 INPUTBOX
-1325
+1370
 75
-1440
+1485
 135
 essential-worker-count
-222.0
+236.0
 1
 0
 Number
 
 INPUTBOX
-1030
+1075
 75
-1130
+1175
 135
 comorbidity-count
-40.0
+43.0
 1
 0
 Number
 
 INPUTBOX
-1255
+1300
 75
-1325
+1370
 135
 senior-count
-40.0
+43.0
 1
 0
 Number
 
 MONITOR
-940
+985
 195
-997
+1042
 240
 NIL
 hour
@@ -2338,9 +1931,9 @@ curfew-hours
 Number
 
 MONITOR
-995
+1040
 195
-1052
+1097
 240
 NIL
 curfew?
@@ -2349,9 +1942,9 @@ curfew?
 11
 
 PLOT
-945
+990
 510
-1520
+1565
 695
 Daily Chart
 Days
@@ -2370,9 +1963,9 @@ PENS
 "Exposed" 1.0 0 -4079321 true "" "plotxy days (count persons with [color = yellow])"
 
 MONITOR
-1050
+1095
 195
-1107
+1152
 240
 NIL
 days
@@ -2381,9 +1974,9 @@ days
 11
 
 PLOT
-1520
+1565
 695
-1825
+1870
 850
 Daily total cases
 Days
@@ -2399,9 +1992,9 @@ PENS
 "default" 1.0 0 -16777216 true "" "plotxy days total-cases"
 
 PLOT
-945
+990
 695
-1520
+1565
 850
 Daily Deaths
 Days
@@ -2419,9 +2012,9 @@ PENS
 "Comorbid Death" 1.0 0 -6459832 true "" "plotxy days comorbid-deaths"
 
 PLOT
-1825
+1870
 695
-2095
+2140
 850
 Daily total recoveries
 Days
@@ -2447,9 +2040,9 @@ alert-level
 3
 
 MONITOR
-1425
+1470
 250
-1482
+1527
 295
 NIL
 deaths
@@ -2463,7 +2056,7 @@ INPUTBOX
 180
 560
 healthcare-area
-1470.0
+1687.5
 1
 0
 Number
@@ -2474,7 +2067,7 @@ INPUTBOX
 180
 620
 grocery-area
-2940.0
+3375.0
 1
 0
 Number
@@ -2485,7 +2078,7 @@ INPUTBOX
 180
 680
 commute-area
-2940.0
+3375.0
 1
 0
 Number
@@ -2496,7 +2089,7 @@ INPUTBOX
 180
 740
 workplace-area
-4410.0
+5062.5
 1
 0
 Number
@@ -2507,7 +2100,7 @@ INPUTBOX
 180
 800
 leisure-area
-4410.0
+5062.5
 1
 0
 Number
@@ -2523,9 +2116,9 @@ Area (sq. m)
 1
 
 MONITOR
-1149
+1194
 250
-1251
+1296
 295
 Persons infected
 count persons with [infected? = true]
@@ -2544,20 +2137,20 @@ Grey: Workplace\nViolet: Grocery\nWhite: Hospital\nCyan: Commute\nRed persons: I
 1
 
 MONITOR
-1325
-250
-1425
-295
-Reinfected agents
-count persons with [times-infected > 1]
+1285
+860
+1417
+905
+Reinfected agents 2
+count persons with [times-infected = 2]
 17
 1
 11
 
 MONITOR
-1249
+1294
 250
-1326
+1371
 295
 NIL
 reinfections
@@ -2566,20 +2159,20 @@ reinfections
 11
 
 INPUTBOX
-1430
+1475
 135
-1535
+1580
 195
 starting-vax-percent
-99.0
+38.5
 1
 0
 Number
 
 MONITOR
-1479
+1524
 250
-1562
+1607
 295
 vaccinations
 vaccinations
@@ -2588,9 +2181,9 @@ vaccinations
 11
 
 INPUTBOX
-1535
+1580
 135
-1695
+1740
 195
 vax-per-day
 1.0
@@ -2599,9 +2192,9 @@ vax-per-day
 Number
 
 MONITOR
-944
+989
 250
-1151
+1196
 295
 Persons exposed (not sick)
 count persons with [color = yellow]
@@ -2610,9 +2203,9 @@ count persons with [color = yellow]
 11
 
 PLOT
-1520
+1565
 295
-2096
+2141
 510
 Contact Tracing
 Days
@@ -2633,9 +2226,9 @@ PENS
 "Home" 1.0 0 -16777216 true "" "plotxy days infect-count-else"
 
 MONITOR
-1625
+1670
 250
-1687
+1732
 295
 NIL
 vax-goal
@@ -2644,9 +2237,9 @@ vax-goal
 11
 
 MONITOR
-1560
+1605
 250
-1627
+1672
 295
 NIL
 vax-count
@@ -2665,9 +2258,9 @@ vax-type
 4
 
 MONITOR
-1105
+1150
 195
-1170
+1215
 240
 Alert Level
 sim-al-name
@@ -2676,9 +2269,9 @@ sim-al-name
 11
 
 PLOT
-1695
+1740
 75
-2095
+2140
 295
 Alert Level Change
 Days
@@ -2694,9 +2287,9 @@ PENS
 "" 1.0 0 -16777216 true "" "plotxy days sim-alert-level"
 
 PLOT
-1520
+1565
 510
-1825
+1870
 695
 Total Vaccinations
 Days
@@ -2737,9 +2330,9 @@ covid-variant
 1
 
 PLOT
-945
+990
 295
-1520
+1565
 510
 Daily Active Cases
 Days
@@ -2755,9 +2348,9 @@ PENS
 "Active Cases" 1.0 0 -16777216 true "" "plotxy days active-cases"
 
 INPUTBOX
-1175
+1220
 135
-1310
+1355
 195
 starting-infected-moderate
 1.0
@@ -2766,9 +2359,9 @@ starting-infected-moderate
 Number
 
 INPUTBOX
-940
+985
 135
-1060
+1105
 195
 starting-infected-asymp
 1.0
@@ -2777,15 +2370,136 @@ starting-infected-asymp
 Number
 
 INPUTBOX
-1310
+1355
 135
-1430
+1475
 195
 starting-infected-severe
 1.0
 1
 0
 Number
+
+MONITOR
+1415
+860
+1547
+905
+Reinfected Agents 3
+count persons with [times-infected = 3]
+17
+1
+11
+
+MONITOR
+1545
+860
+1677
+905
+Reinfected agents 4
+count persons with [times-infected = 4]
+17
+1
+11
+
+MONITOR
+1675
+860
+1795
+905
+Reinfected agents >4
+count persons with [times-infected > 4]
+17
+1
+11
+
+MONITOR
+1155
+860
+1287
+905
+Reinfected agents 1
+count persons with [times-infected = 1]
+17
+1
+11
+
+MONITOR
+990
+860
+1157
+905
+Never been infected agents
+count persons with [times-infected = 0]
+17
+1
+11
+
+MONITOR
+990
+905
+1152
+950
+Vaccinated, never infected
+count persons with [times-infected = 0 and vaccinated? = true]
+17
+1
+11
+
+MONITOR
+1150
+905
+1317
+950
+Vaccinated, Reinfected once
+count persons with [times-infected = 1 and vaccinated? = true]
+17
+1
+11
+
+MONITOR
+1315
+905
+1487
+950
+Vaccinated, Reinfected twice
+count persons with [times-infected = 2 and vaccinated? = true]
+17
+1
+11
+
+MONITOR
+1485
+905
+1577
+950
+Vax, reinfect 3
+count persons with [times-infected = 3 and vaccinated? = true]
+17
+1
+11
+
+MONITOR
+1575
+905
+1672
+950
+Vax, Reinfect 4
+count persons with [times-infected = 4 and vaccinated? = true]
+17
+1
+11
+
+MONITOR
+1670
+905
+1777
+950
+Vax, Reinfect >4
+count persons with [times-infected > 4 and vaccinated? = true]
+17
+1
+11
 
 @#$#@#$#@
 ## WHAT IS IT?
