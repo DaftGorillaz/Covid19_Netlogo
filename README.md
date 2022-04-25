@@ -35,7 +35,7 @@ This study aims to analyze the COVID-19 pandemic response of the Philippines usi
 ## Setup
 ![setup](https://user-images.githubusercontent.com/55699420/157391268-a902cda7-e43b-49e7-b2f1-10c17a2c6be7.gif)
 
-700x700 Area
+150x150 Area
 ### Legend
 - Patches
   - Grey:     Workplace
@@ -53,6 +53,7 @@ This study aims to analyze the COVID-19 pandemic response of the Philippines usi
 ## Simulation Table
 | **Scenario Title**  | **Variant** | **Alert Level** | **Vaccine** |
 | :---:               | :---:       | :---:           | :---:       |
+| D-45-AVER           | Delta       | 4,5 | Average |
 | D-1-NULL            | Delta       | 1   | No Vaccine  |
 | D-1-INAC            | Delta       | 1   | Inactivated |
 | D-1-VIRA            | Delta       | 1   | Viral Vector |
