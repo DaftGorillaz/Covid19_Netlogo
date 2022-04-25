@@ -11,12 +11,12 @@ This study aims to analyze the COVID-19 pandemic response of the Philippines usi
 - Dominic Lance B. Salmingo
 
 ## Objectives
-- [ ] Create a baseline wherein, non-pharmaceutical response and MHS are used in community quarantines against the Delta and non-Delta variants.
-- [ ] Simulate the pandemic with the addition of the multiple pharmaceutical responses one at a time. Changing from on type of vaccine to another
-- [ ] Compare the results of pharmaceutical response against the non-pharmaceutical response against the pandemic
-- [ ] Compare the simulation results with real world data.
-- [ ] Analyze the simulation results to determine the necessity of community quarantines
-- [ ] Determine, through the simulation, when the pandemic will end.
+- [x] Create a baseline wherein, non-pharmaceutical response and MHS are used in community quarantines against the Delta and non-Delta variants.
+- [x] Simulate the pandemic with the addition of the multiple pharmaceutical responses one at a time. Changing from on type of vaccine to another
+- [x] Compare the results of pharmaceutical response against the non-pharmaceutical response against the pandemic
+- [x] Compare the simulation results with real world data.
+- [x] Analyze the simulation results to determine the necessity of community quarantines
+- [x] Determine, through the simulation, when the pandemic will end.
 
 ## Vaccine Types
 | Inactivated       | Viral Vector                | mRNA            |
